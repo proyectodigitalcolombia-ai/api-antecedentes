@@ -1,0 +1,24 @@
+{
+  "name": "api-antecedentes-colombia",
+  "version": "1.0.0",
+  "description": "API para consulta de antecedentes con Puppeteer y Redis",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "worker": "node src/worker.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "bull": "^4.10.0",
+    "cloudinary": "^1.37.0",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "ioredis": "^5.3.2",
+    "puppeteer": "^20.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "author": "",
+  "license": "ISC"
+}
