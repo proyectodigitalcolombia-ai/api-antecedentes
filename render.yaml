@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: api-principal
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node src/server.js
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          name: cache-datos
+          type: redis
+          property: connectionString
+
+  - type: worker
+    name: bot-navegador
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node src/worker.js
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          name: cache-datos
+          type: redis
+          property: connectionString
+
+databases:
+  - name: cache-datos
+    type: redis
+    plan: free
