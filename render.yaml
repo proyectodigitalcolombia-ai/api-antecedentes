@@ -1,5 +1,4 @@
 services:
-  # 1. El cerebro: API que recibe las peticiones
   - type: web
     name: api-principal
     env: node
@@ -12,8 +11,9 @@ services:
           name: cache-datos
           type: redis
           property: connectionString
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "true"
 
-  # 2. El músculo: El bot que navega (Worker)
   - type: worker
     name: bot-navegador
     env: node
@@ -26,9 +26,10 @@ services:
           name: cache-datos
           type: redis
           property: connectionString
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "true"
 
-  # 3. La memoria: Redis (Ahora se define como servicio)
   - type: redis
     name: cache-datos
     plan: free
-    ipAllowList: [] # Permite que tus otros servicios se conecten internamente
+    ipAllowList: []
