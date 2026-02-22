@@ -4,42 +4,40 @@ const Bull = require('bull');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Configuración de Redis con TLS para Render
-const REDIS_URL = process.env.REDIS_URL;
-
+// Configuración robusta para Redis en Render
 const queueOptions = {
     redis: {
         tls: { rejectUnauthorized: false },
         enableReadyCheck: false,
-        maxRetriesPerRequest: null
+        maxRetriesPerRequest: null,
+        connectTimeout: 20000 // 20 segundos de gracia
     }
 };
 
-const backgroundCheckQueue = new Bull('background-check-queue', REDIS_URL, queueOptions);
+const backgroundCheckQueue = new Bull('background-check-queue', process.env.REDIS_URL, queueOptions);
 
-app.use(express.json());
-
-app.get('/', (req, res) => {
-    res.send('✅ API Principal Funcionando');
-});
+app.get('/', (req, res) => res.send('✅ API Principal Online'));
 
 app.get('/consultar', async (req, res) => {
     const { cedula } = req.query;
     if (!cedula) return res.status(400).json({ error: 'Falta la cédula' });
 
     try {
-        // Añadimos un timeout para que no se quede la página en blanco si Redis no responde
-        await backgroundCheckQueue.add({ cedula }, { timeout: 5000 });
-        console.log(`📩 Cédula ${cedula} enviada a la cola.`);
+        // Añadimos la tarea a la cola
+        await backgroundCheckQueue.add({ cedula });
+        console.log(`📩 Cédula ${cedula} puesta en cola.`);
         
         res.json({
-            mensaje: `Consulta para la cédula ${cedula} recibida.`,
-            estado: "En cola"
+            mensaje: `Consulta para ${cedula} recibida y en proceso.`,
+            estado: "Enviado al bot"
         });
     } catch (error) {
-        console.error('❌ Error de Redis:', error.message);
-        res.status(500).json({ error: 'Error al conectar con la base de datos de tareas.' });
+        console.error('❌ Error de conexión:', error.message);
+        res.status(500).json({ 
+            error: 'La API no pudo hablar con Redis.',
+            ayuda: 'Revisa que REDIS_URL empiece con rediss://' 
+        });
     }
 });
 
-app.listen(PORT, () => console.log(`🚀 API en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
