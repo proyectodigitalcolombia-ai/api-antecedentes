@@ -1,54 +1,46 @@
-const Bull = require('bull');
-const puppeteer = require('puppeteer-core');
-const cloudinary = require('cloudinary').v2;
+const { createClient } = require('redis');
 
-cloudinary.config({ cloudinary_url: process.env.CLOUDINARY_URL });
-
-const backgroundCheckQueue = new Bull('background-check-queue', process.env.REDIS_URL, {
-    redis: {
-        tls: { rejectUnauthorized: false },
-        enableReadyCheck: false,
-        maxRetriesPerRequest: null
+// Configuración idéntica a la del servidor
+const client = createClient({
+    url: process.env.REDIS_URL,
+    socket: {
+        reconnectStrategy: (retries) => Math.min(retries * 100, 3000),
+        connectTimeout: 10000
     }
 });
 
-console.log('🤖 Bot iniciado. Esperando tareas de la API...');
+client.on('error', (err) => console.log('❌ Error en Redis Worker:', err));
 
-backgroundCheckQueue.process(async (job) => {
-    const { cedula } = job.data;
-    console.log(`🔎 Buscando antecedentes para: ${cedula}`);
-
-    let browser;
+async function iniciarWorker() {
     try {
-        browser = await puppeteer.launch({
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-        });
+        await client.connect();
+        console.log('✅ Bot conectado a Redis. Esperando tareas...');
 
-        const page = await browser.newPage();
-        await page.goto('https://srvandroid.policia.gov.co/antecedentes/', { waitUntil: 'networkidle2', timeout: 60000 });
+        // Bucle infinito para procesar tareas
+        while (true) {
+            try {
+                // brPop espera hasta que haya algo en la lista 'tareas_antecedentes'
+                // El '0' significa que esperará indefinidamente sin cerrarse
+                const tareaRaw = await client.brPop('tareas_antecedentes', 0);
+                
+                if (tareaRaw) {
+                    const datos = JSON.parse(tareaRaw.element);
+                    console.log(`🤖 Procesando consulta para la cédula: ${datos.cedula}`);
 
-        await page.type('#documento', cedula);
-        await page.click('#btnConsultar');
-
-        await new Promise(r => setTimeout(r, 7000)); // Espera a que cargue la info
-        const screenshot = await page.screenshot({ type: 'jpeg', quality: 60 });
-
-        const upload = await new Promise((resolve, reject) => {
-            const stream = cloudinary.uploader.upload_stream(
-                { folder: 'antecedentes', public_id: `cedula_${cedula}` },
-                (error, result) => result ? resolve(result) : reject(error)
-            );
-            stream.end(screenshot);
-        });
-
-        console.log(`✅ Foto lista: ${upload.secure_url}`);
-        return { url: upload.secure_url };
-
+                    // --- AQUÍ VA TU LÓGICA DE PUPPETEER / SCRAPPING ---
+                    // Ejemplo: await buscarEnPagina(datos.cedula);
+                    
+                    console.log(`✅ Finalizado proceso de cédula: ${datos.cedula}`);
+                }
+            } catch (err) {
+                console.error('❌ Error al procesar una tarea individual:', err);
+            }
+        }
     } catch (err) {
-        console.error(`❌ Error en el proceso: ${err.message}`);
-        throw err;
-    } finally {
-        if (browser) await browser.close();
+        console.error('🚀 Error crítico en el inicio del Worker:', err);
+        // Intentar reiniciar el worker tras un error grave
+        setTimeout(iniciarWorker, 5000);
     }
-});
+}
+
+iniciarWorker();
