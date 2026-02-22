@@ -2,10 +2,8 @@ const Bull = require('bull');
 const puppeteer = require('puppeteer-core');
 const cloudinary = require('cloudinary').v2;
 
-// Configuración Cloudinary
 cloudinary.config({ cloudinary_url: process.env.CLOUDINARY_URL });
 
-// Configuración Redis (Igual a la del server)
 const backgroundCheckQueue = new Bull('background-check-queue', process.env.REDIS_URL, {
     redis: {
         tls: { rejectUnauthorized: false },
@@ -14,11 +12,11 @@ const backgroundCheckQueue = new Bull('background-check-queue', process.env.REDI
     }
 });
 
-console.log('🤖 Bot esperando tareas...');
+console.log('🤖 Bot iniciado. Esperando tareas de la API...');
 
 backgroundCheckQueue.process(async (job) => {
     const { cedula } = job.data;
-    console.log(`🔎 Procesando: ${cedula}`);
+    console.log(`🔎 Buscando antecedentes para: ${cedula}`);
 
     let browser;
     try {
@@ -28,20 +26,14 @@ backgroundCheckQueue.process(async (job) => {
         });
 
         const page = await browser.newPage();
-        await page.setDefaultNavigationTimeout(60000);
+        await page.goto('https://srvandroid.policia.gov.co/antecedentes/', { waitUntil: 'networkidle2', timeout: 60000 });
 
-        // Ir a la página
-        await page.goto('https://srvandroid.policia.gov.co/antecedentes/', { waitUntil: 'networkidle2' });
-
-        // Escribir cédula y buscar
         await page.type('#documento', cedula);
         await page.click('#btnConsultar');
 
-        // Esperar resultado y capturar
-        await new Promise(r => setTimeout(r, 6000));
+        await new Promise(r => setTimeout(r, 7000)); // Espera a que cargue la info
         const screenshot = await page.screenshot({ type: 'jpeg', quality: 60 });
 
-        // Subir a Cloudinary
         const upload = await new Promise((resolve, reject) => {
             const stream = cloudinary.uploader.upload_stream(
                 { folder: 'antecedentes', public_id: `cedula_${cedula}` },
@@ -50,11 +42,11 @@ backgroundCheckQueue.process(async (job) => {
             stream.end(screenshot);
         });
 
-        console.log(`✅ Resultado: ${upload.secure_url}`);
+        console.log(`✅ Foto lista: ${upload.secure_url}`);
         return { url: upload.secure_url };
 
     } catch (err) {
-        console.error(`❌ Error en bot: ${err.message}`);
+        console.error(`❌ Error en el proceso: ${err.message}`);
         throw err;
     } finally {
         if (browser) await browser.close();
