@@ -1,46 +1,67 @@
 const { createClient } = require('redis');
+const puppeteer = require('puppeteer');
 
-// Configuración idéntica a la del servidor
 const client = createClient({
     url: process.env.REDIS_URL,
-    socket: {
-        reconnectStrategy: (retries) => Math.min(retries * 100, 3000),
-        connectTimeout: 10000
-    }
+    socket: { reconnectStrategy: (retries) => Math.min(retries * 100, 3000) }
 });
 
-client.on('error', (err) => console.log('❌ Error en Redis Worker:', err));
+client.on('error', (err) => console.log('❌ Error Redis:', err));
 
-async function iniciarWorker() {
+async function consultarAntecedentes(cedula) {
+    console.log(`🔎 Iniciando búsqueda en la web para: ${cedula}`);
+    
+    // Configuracion necesaria para que Puppeteer corra en Render
+    const browser = await puppeteer.launch({
+        headless: "new",
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
     try {
-        await client.connect();
-        console.log('✅ Bot conectado a Redis. Esperando tareas...');
+        const page = await browser.newPage();
+        
+        // 1. Ir a la página (Cambia el URL por el real)
+        await page.goto('https://url-de-la-pagina-de-antecedentes.com', { waitUntil: 'networkidle2' });
 
-        // Bucle infinito para procesar tareas
-        while (true) {
-            try {
-                // brPop espera hasta que haya algo en la lista 'tareas_antecedentes'
-                // El '0' significa que esperará indefinidamente sin cerrarse
-                const tareaRaw = await client.brPop('tareas_antecedentes', 0);
-                
-                if (tareaRaw) {
-                    const datos = JSON.parse(tareaRaw.element);
-                    console.log(`🤖 Procesando consulta para la cédula: ${datos.cedula}`);
+        // 2. Escribir la cédula
+        // Ajusta el selector 'input[name="cedula"]' según la página real
+        await page.type('#numero_documento', cedula); 
+        
+        // 3. Click en buscar
+        await page.click('#btn-buscar');
 
-                    // --- AQUÍ VA TU LÓGICA DE PUPPETEER / SCRAPPING ---
-                    // Ejemplo: await buscarEnPagina(datos.cedula);
-                    
-                    console.log(`✅ Finalizado proceso de cédula: ${datos.cedula}`);
-                }
-            } catch (err) {
-                console.error('❌ Error al procesar una tarea individual:', err);
-            }
-        }
-    } catch (err) {
-        console.error('🚀 Error crítico en el inicio del Worker:', err);
-        // Intentar reiniciar el worker tras un error grave
-        setTimeout(iniciarWorker, 5000);
+        // 4. Esperar el resultado
+        await page.waitForTimeout(3000); 
+
+        // 5. Ejemplo: Tomar captura de pantalla
+        const screenshot = await page.screenshot({ encoding: "base64" });
+        console.log(`📸 Captura tomada para ${cedula}`);
+
+        // AQUÍ LUEGO SUBIREMOS A CLOUDINARY
+        return "Proceso completado con éxito";
+
+    } catch (error) {
+        console.error(`❌ Error en Puppeteer para ${cedula}:`, error.message);
+    } finally {
+        await browser.close();
     }
 }
 
-iniciarWorker();
+async function iniciar() {
+    await client.connect();
+    console.log('✅ Bot conectado y listo para Puppeteer');
+
+    while (true) {
+        try {
+            const tareaRaw = await client.brPop('tareas_antecedentes', 0);
+            if (tareaRaw) {
+                const datos = JSON.parse(tareaRaw.element);
+                await consultarAntecedentes(datos.cedula);
+            }
+        } catch (err) {
+            console.error('Error en el bucle:', err);
+        }
+    }
+}
+
+iniciar();
