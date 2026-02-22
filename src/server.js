@@ -3,28 +3,33 @@ const { createClient } = require('redis');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Configuración del cliente de Redis
+// Configuración de Redis con tu URL interna funcional
 const client = createClient({
     url: process.env.REDIS_URL,
     socket: {
         reconnectStrategy: (retries) => Math.min(retries * 100, 3000),
-        connectTimeout: 10000 // 10 segundos máximo para conectar
+        connectTimeout: 10000
     }
 });
 
 client.on('error', (err) => console.log('❌ Error en Redis Client:', err));
-client.on('connect', () => console.log('✅ Conectado a Redis exitosamente'));
 
-// Conectar a Redis antes de iniciar el servidor
 async function connectRedis() {
     try {
         await client.connect();
+        console.log('✅ API conectada a Redis exitosamente');
     } catch (err) {
-        console.error('🚀 Error inicial de conexión a Redis:', err);
+        console.error('🚀 Error conectando a Redis:', err);
     }
 }
 connectRedis();
 
+// RUTA DE SALUD (Esto arregla el "Failed Deploy" en la API)
+app.get('/', (req, res) => {
+    res.status(200).send('API Activa y Funcionando 🚀');
+});
+
+// RUTA DE CONSULTA
 app.get('/consultar', async (req, res) => {
     const { cedula } = req.query;
 
@@ -33,28 +38,26 @@ app.get('/consultar', async (req, res) => {
     }
 
     try {
-        // Verificamos si Redis está listo antes de enviar la tarea
         if (!client.isOpen) {
-            return res.status(500).json({ error: 'La base de datos Redis no está lista' });
+            return res.status(500).json({ error: 'Redis no está listo' });
         }
 
-        // Enviar la tarea a la cola de Redis (List)
+        // Enviar a la cola
         await client.lPush('tareas_antecedentes', JSON.stringify({
             cedula,
-            timestamp: new Date().toISOString()
+            fecha: new Date().toISOString()
         }));
 
-        console.log(`📩 Tarea añadida para cédula: ${cedula}`);
+        console.log(`📩 Tarea encolada para cédula: ${cedula}`);
         
         res.json({
             mensaje: 'Consulta recibida y en proceso',
-            cedula: cedula,
-            estado: 'Pendiente'
+            cedula: cedula
         });
 
     } catch (error) {
-        console.error('❌ Error al procesar la petición:', error);
-        res.status(500).json({ error: 'Error interno al conectar con la cola de trabajo' });
+        console.error('❌ Error al procesar:', error);
+        res.status(500).json({ error: 'Error interno' });
     }
 });
 
