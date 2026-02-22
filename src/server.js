@@ -4,49 +4,42 @@ const Bull = require('bull');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// 1. Configuración de la cola con soporte para Redis en Render (TLS)
-// Es importante que REDIS_URL sea la "External Connection String" (rediss://)
+// Configuración de Redis con TLS para Render
 const REDIS_URL = process.env.REDIS_URL;
 
-const backgroundCheckQueue = new Bull('background-check-queue', REDIS_URL, {
+const queueOptions = {
     redis: {
-        tls: {
-            rejectUnauthorized: false // Permite la conexión segura en Render
-        }
+        tls: { rejectUnauthorized: false },
+        enableReadyCheck: false,
+        maxRetriesPerRequest: null
     }
-});
+};
+
+const backgroundCheckQueue = new Bull('background-check-queue', REDIS_URL, queueOptions);
 
 app.use(express.json());
 
-// Ruta de prueba
 app.get('/', (req, res) => {
-    res.send('✅ API Principal de Antecedentes en línea y protegida.');
+    res.send('✅ API Principal Funcionando');
 });
 
-// 2. Ruta para recibir la consulta
 app.get('/consultar', async (req, res) => {
     const { cedula } = req.query;
-
-    if (!cedula) {
-        return res.status(400).json({ error: 'Falta la cédula en la URL. Ejemplo: /consultar?cedula=12345' });
-    }
+    if (!cedula) return res.status(400).json({ error: 'Falta la cédula' });
 
     try {
-        // Agregamos la tarea a la cola de Redis
-        await backgroundCheckQueue.add({ cedula });
-        
-        console.log(`📩 Tarea recibida para cédula: ${cedula}`);
+        // Añadimos un timeout para que no se quede la página en blanco si Redis no responde
+        await backgroundCheckQueue.add({ cedula }, { timeout: 5000 });
+        console.log(`📩 Cédula ${cedula} enviada a la cola.`);
         
         res.json({
-            mensaje: `Consulta para la cédula ${cedula} recibida y en proceso.`,
-            estado: "Enviado al bot"
+            mensaje: `Consulta para la cédula ${cedula} recibida.`,
+            estado: "En cola"
         });
     } catch (error) {
-        console.error('❌ Error al conectar con Redis:', error);
-        res.status(500).json({ error: 'Error de conexión con el servidor de tareas (Redis)' });
+        console.error('❌ Error de Redis:', error.message);
+        res.status(500).json({ error: 'Error al conectar con la base de datos de tareas.' });
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 API principal escuchando en puerto ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 API en puerto ${PORT}`));
