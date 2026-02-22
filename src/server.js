@@ -1,43 +1,63 @@
 const express = require('express');
-const Bull = require('bull');
-
+const { createClient } = require('redis');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Configuración robusta para Redis en Render
-const queueOptions = {
-    redis: {
-        tls: { rejectUnauthorized: false },
-        enableReadyCheck: false,
-        maxRetriesPerRequest: null,
-        connectTimeout: 20000 // 20 segundos de gracia
-    }
-};
-
-const backgroundCheckQueue = new Bull('background-check-queue', process.env.REDIS_URL, queueOptions);
-
-app.get('/', (req, res) => res.send('✅ API Principal Online'));
-
-app.get('/consultar', async (req, res) => {
-    const { cedula } = req.query;
-    if (!cedula) return res.status(400).json({ error: 'Falta la cédula' });
-
-    try {
-        // Añadimos la tarea a la cola
-        await backgroundCheckQueue.add({ cedula });
-        console.log(`📩 Cédula ${cedula} puesta en cola.`);
-        
-        res.json({
-            mensaje: `Consulta para ${cedula} recibida y en proceso.`,
-            estado: "Enviado al bot"
-        });
-    } catch (error) {
-        console.error('❌ Error de conexión:', error.message);
-        res.status(500).json({ 
-            error: 'La API no pudo hablar con Redis.',
-            ayuda: 'Revisa que REDIS_URL empiece con rediss://' 
-        });
+// Configuración del cliente de Redis
+const client = createClient({
+    url: process.env.REDIS_URL,
+    socket: {
+        reconnectStrategy: (retries) => Math.min(retries * 100, 3000),
+        connectTimeout: 10000 // 10 segundos máximo para conectar
     }
 });
 
-app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
+client.on('error', (err) => console.log('❌ Error en Redis Client:', err));
+client.on('connect', () => console.log('✅ Conectado a Redis exitosamente'));
+
+// Conectar a Redis antes de iniciar el servidor
+async function connectRedis() {
+    try {
+        await client.connect();
+    } catch (err) {
+        console.error('🚀 Error inicial de conexión a Redis:', err);
+    }
+}
+connectRedis();
+
+app.get('/consultar', async (req, res) => {
+    const { cedula } = req.query;
+
+    if (!cedula) {
+        return res.status(400).json({ error: 'Falta la cédula' });
+    }
+
+    try {
+        // Verificamos si Redis está listo antes de enviar la tarea
+        if (!client.isOpen) {
+            return res.status(500).json({ error: 'La base de datos Redis no está lista' });
+        }
+
+        // Enviar la tarea a la cola de Redis (List)
+        await client.lPush('tareas_antecedentes', JSON.stringify({
+            cedula,
+            timestamp: new Date().toISOString()
+        }));
+
+        console.log(`📩 Tarea añadida para cédula: ${cedula}`);
+        
+        res.json({
+            mensaje: 'Consulta recibida y en proceso',
+            cedula: cedula,
+            estado: 'Pendiente'
+        });
+
+    } catch (error) {
+        console.error('❌ Error al procesar la petición:', error);
+        res.status(500).json({ error: 'Error interno al conectar con la cola de trabajo' });
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
+});
