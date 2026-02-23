@@ -2,76 +2,59 @@ const puppeteer = require('puppeteer');
 const { createClient } = require('redis');
 const { Solver } = require('2captcha');
 const express = require('express');
-const fs = require('fs');
 
-// --- CONFIGURACIÓN ---
-const REDIS_URL = process.env.REDIS_URL;
-const CAPTCHA_KEY = process.env.CAPTCHA_KEY || "TU_API_KEY_AQUÍ";
-
-const solver = new Solver(CAPTCHA_KEY);
-const client = createClient({ url: REDIS_URL });
-
-client.on('error', (err) => console.log('🔴 Redis Client Error', err));
+const client = createClient({ url: process.env.REDIS_URL });
+const solver = new Solver(process.env.CAPTCHA_KEY || "TU_KEY_AQUÍ");
 
 async function ejecutarScraping(cedula) {
     let browser;
     try {
-        console.log(`--- 🤖 INICIANDO NUEVA CONSULTA: ${cedula} ---`);
+        console.log(`--- 🤖 CONSULTANDO: ${cedula} ---`);
         
-        // 1. RUTAS POSIBLES (Donde Render suele instalar Chrome)
-        const rutas = [
-            '/opt/render/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome',
-            '/opt/render/project/src/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome'
-        ];
-
-        let chromePath = '';
-        for (const ruta of rutas) {
-            if (fs.existsSync(ruta)) {
-                chromePath = ruta;
-                console.log(`✅ Chrome localizado en: ${ruta}`);
-                break;
-            }
-        }
-
-        // Si no se encuentra, hacemos un debug de la carpeta
-        if (!chromePath) {
-            console.log("❌ Chrome no encontrado en rutas estándar. Escaneando directorio...");
-            const baseDir = '/opt/render/.cache/puppeteer';
-            if (fs.existsSync(baseDir)) {
-                console.log("Contenido detectado en cache:", fs.readdirSync(baseDir));
-            }
-            throw new Error("No se pudo hallar el ejecutable de Chrome. Revisa el build log.");
-        }
-
-        // 2. LANZAR NAVEGADOR
+        // Aquí NO ponemos rutas. Dejamos que las variables de Render manden.
         browser = await puppeteer.launch({
             headless: "new",
-            executablePath: chromePath,
-            ignoreDefaultArgs: ['--disable-extensions'], 
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--single-process',
-                '--no-zygote'
-            ]
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH, 
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process']
         });
 
         const page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+        await page.goto('https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml', { waitUntil: 'networkidle2' });
 
-        console.log('🌐 1. Entrando a la web de la Policía...');
-        await page.goto('https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml', { 
-            waitUntil: 'networkidle2', 
-            timeout: 60000 
-        });
-
-        // 3. PASAR PÁGINA DE TÉRMINOS
-        await page.waitForSelector('input[type="checkbox"]', { timeout: 15000 });
+        // Lógica simplificada de aceptación
+        await page.waitForSelector('input[type="checkbox"]');
         await page.click('input[type="checkbox"]');
         await page.click('#continuarPasoSiguiente');
 
-        // 4. CAPTCHA
-        console.log('🧩 2. Resolviendo Captcha...');
-        const siteKey = await page.evaluate(() => {
-            return document.querySelector('.g-recaptcha')?.getAttribute('data-sitekey') || '6LdX80EUAAAAAL6v5yM8S7L9S7S7S7
+        // Captcha y resultado...
+        const siteKey = await page.evaluate(() => document.querySelector('.g-recaptcha')?.getAttribute('data-sitekey'));
+        const solve = await solver.recaptcha({ pageurl: page.url(), googlekey: siteKey });
+        
+        await page.evaluate((token) => { document.querySelector('#g-recaptcha-response').innerHTML = token; }, solve.data);
+        await page.type('input[id*="cedulaInput"]', cedula);
+        await page.click('button[id*="btnConsultar"]');
+        
+        await new Promise(r => setTimeout(r, 5000));
+        const res = await page.evaluate(() => document.body.innerText.includes('No tiene asuntos pendientes') ? "LIMPIO" : "REVISAR");
+
+        await client.set(`resultado:${cedula}`, res, { EX: 86400 });
+        console.log(`✅ OK: ${cedula}`);
+
+    } catch (e) {
+        console.error(`❌ ERROR: ${e.message}`);
+    } finally {
+        if (browser) await browser.close();
+    }
+}
+
+async function iniciar() {
+    await client.connect();
+    while (true) {
+        const t = await client.brPop('cola_consultas', 0);
+        const d = JSON.parse(t.element);
+        await ejecutarScraping(d.cedula || d);
+    }
+}
+
+const app = express();
+app.listen(process.env.PORT || 10000, () => iniciar());
