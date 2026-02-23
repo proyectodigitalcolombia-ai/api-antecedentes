@@ -8,7 +8,7 @@ const client = createClient({
 client.on('error', (err) => console.log('❌ Error en Redis Worker:', err));
 
 async function consultarEnWeb(cedula) {
-    console.log(`🔎 Iniciando búsqueda para: ${cedula}`);
+    console.log(`🔎 [BOT] Iniciando scraping para: ${cedula}`);
     
     const browser = await puppeteer.launch({
         headless: "new",
@@ -23,27 +23,36 @@ async function consultarEnWeb(cedula) {
     try {
         const page = await browser.newPage();
         
-        // --- PRUEBA INICIAL ---
-        await page.goto('https://www.google.com', { waitUntil: 'networkidle2' });
-        console.log(`✅ Página cargada correctamente para: ${cedula}`);
-        // -----------------------
+        // --- LÓGICA DE SCRAPING EN HACKER NEWS ---
+        console.log(`🌐 Navegando a Hacker News...`);
+        await page.goto('https://news.ycombinator.com', { waitUntil: 'networkidle2', timeout: 60000 });
+
+        // Extraemos el título de la primera noticia como prueba
+        const primerTitulo = await page.evaluate(() => {
+            const enlace = document.querySelector('.titleline > a');
+            return enlace ? enlace.innerText : 'No se encontró el título';
+        });
+
+        console.log(`✅ Resultado para ${cedula}: La noticia top es "${primerTitulo}"`);
+        // -----------------------------------------
 
     } catch (error) {
         console.error(`❌ Error en Puppeteer para ${cedula}:`, error.message);
     } finally {
         await browser.close();
-        console.log(`Navegador cerrado para ${cedula}`);
+        console.log(`☁️ Navegador cerrado y RAM liberada.`);
     }
 }
 
 async function iniciarWorker() {
     try {
         await client.connect();
-        console.log('✅ Bot conectado y esperando tareas...');
+        console.log('🤖 BOT ONLINE: Esperando tareas de la API...');
 
         while (true) {
-            // brPop espera una tarea de la lista 'tareas_antecedentes'
+            // brPop espera (bloquea) hasta que llegue algo a la lista
             const tareaRaw = await client.brPop('tareas_antecedentes', 0);
+            
             if (tareaRaw) {
                 const { cedula } = JSON.parse(tareaRaw.element);
                 await consultarEnWeb(cedula);
@@ -51,7 +60,6 @@ async function iniciarWorker() {
         }
     } catch (err) {
         console.error('🚀 Error crítico en el Worker:', err);
-        // Reintento automático en 5 segundos
         setTimeout(iniciarWorker, 5000);
     }
 }
