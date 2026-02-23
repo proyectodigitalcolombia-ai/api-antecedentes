@@ -1,7 +1,7 @@
 {
-  "name": "api-antecedentes-colombia",
+  "name": "api-antecedentes-principal",
   "version": "1.0.0",
-  "description": "API y Bot de Scraping para antecedentes",
+  "description": "Sistema de consulta de antecedentes con Puppeteer y Redis",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -12,10 +12,9 @@
     "2captcha": "^3.0.7",
     "express": "^4.18.2",
     "puppeteer": "^21.0.0",
-    "redis": "^4.6.0",
-    "uuid": "^9.0.1"
+    "redis": "^4.6.10"
   },
   "engines": {
-    "node": "20.x"
+    "node": ">=20.0.0"
   }
 }
