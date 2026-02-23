@@ -1,7 +1,7 @@
 {
-  "name": "bot-antecedentes",
+  "name": "sistema-antecedentes",
   "version": "1.0.0",
-  "description": "",
+  "description": "Bot de consultas multientidad",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -11,5 +11,8 @@
     "express": "^4.18.2",
     "redis": "^4.6.10",
     "puppeteer": "^21.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
