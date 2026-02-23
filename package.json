@@ -1,15 +1,19 @@
 {
-  "name": "api-antecedentes-worker",
+  "name": "api-antecedentes-colombia",
   "version": "1.0.0",
-  "main": "src/worker.js",
+  "description": "API y Bot de Scraping para antecedentes",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/worker.js"
+    "start": "node index.js",
+    "worker": "node src/worker.js",
+    "build": "npm install && npx puppeteer browsers install chrome"
   },
   "dependencies": {
+    "2captcha": "^3.0.7",
+    "express": "^4.18.2",
     "puppeteer": "^21.0.0",
     "redis": "^4.6.0",
-    "express": "^4.18.2",
-    "2captcha": "^3.0.0"
+    "uuid": "^9.0.1"
   },
   "engines": {
     "node": "20.x"
