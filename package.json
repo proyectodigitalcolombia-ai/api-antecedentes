@@ -1,15 +1,15 @@
 {
-  "name": "api-antecedentes-worker",
+  "name": "api-antecedentes-principal",
   "version": "1.0.0",
-  "description": "Worker para consulta de antecedentes Policia Nacional",
-  "main": "src/worker.js",
+  "description": "API Principal para recibir consultas",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/worker.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "puppeteer": "^21.0.0",
+    "express": "^4.18.2",
     "redis": "^4.6.0",
-    "2captcha": "^3.0.0"
+    "uuid": "^9.0.0"
   },
   "engines": {
     "node": "20.x"
