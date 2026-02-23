@@ -1,19 +1,28 @@
 const { createClient } = require('redis');
 const puppeteer = require('puppeteer');
 const Captcha = require('2captcha');
+const http = require('http');
 
-// --- CONFIGURACIÓN DE APIS ---
-// El SOLVER_API_KEY se toma de las variables de entorno de Render
+// --- 1. MINI SERVIDOR PARA RENDER (EVITA ERROR DE PUERTO) ---
+const port = process.env.PORT || 10000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot de Antecedentes Activo\n');
+}).listen(port, () => {
+    console.log(`📡 Servidor de salud escuchando en puerto ${port}`);
+});
+
+// --- 2. CONFIGURACIÓN DE APIS ---
 const SOLVER_API_KEY = process.env.CAPTCHA_KEY || 'fd9177f1a724968f386c07483252b4e8';
 const solver = new Captcha.Solver(SOLVER_API_KEY);
 
 const REDIS_URL = process.env.REDIS_URL;
 const client = createClient({ url: REDIS_URL });
 
+// --- 3. LÓGICA DE SCRAPING ---
 async function ejecutarScraping(cedula) {
     console.log(`\n--- 🤖 INICIANDO NUEVA CONSULTA: ${cedula} ---`);
     
-    // Lanzamos el navegador usando la ruta nativa de Render para evitar descargas
     const browser = await puppeteer.launch({
         headless: "new",
         executablePath: '/usr/bin/google-chrome', 
@@ -27,8 +36,6 @@ async function ejecutarScraping(cedula) {
 
     try {
         const page = await browser.newPage();
-        
-        // Simular un navegador real para evitar bloqueos
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
         console.log(`🌐 1. Conectando a la Policía Nacional...`);
@@ -37,7 +44,6 @@ async function ejecutarScraping(cedula) {
             timeout: 60000 
         });
 
-        // --- PASO 1: ACEPTAR TÉRMINOS ---
         console.log(`⚖️ 2. Aceptando términos...`);
         await page.waitForSelector('input[type="checkbox"]', { timeout: 15000 });
         await page.click('input[type="checkbox"]');
@@ -47,14 +53,13 @@ async function ejecutarScraping(cedula) {
             page.waitForNavigation({ waitUntil: 'networkidle2' })
         ]);
 
-        // --- PASO 2: RESOLVER CAPTCHA ---
         console.log(`🧩 3. Identificando ReCaptcha...`);
         const sitekey = await page.evaluate(() => {
             const el = document.querySelector('.g-recaptcha');
             return el ? el.getAttribute('data-sitekey') : null;
         });
 
-        if (!sitekey) throw new Error("No se pudo encontrar el SiteKey de Google.");
+        if (!sitekey) throw new Error("No se pudo encontrar el SiteKey.");
 
         console.log(`⏳ 4. Solicitando solución a 2Captcha...`);
         const res = await solver.recaptcha(sitekey, page.url());
@@ -64,7 +69,6 @@ async function ejecutarScraping(cedula) {
             document.querySelector('#g-recaptcha-response').innerHTML = token;
         }, res.data);
 
-        // --- PASO 3: LLENAR FORMULARIO ---
         console.log(`✍️ 6. Ingresando cédula: ${cedula}`);
         const inputId = '#procesoPoli\\:cedulaInput';
         const btnId = '#procesoPoli\\:btnConsultar';
@@ -75,7 +79,6 @@ async function ejecutarScraping(cedula) {
         console.log(`🔍 7. Clic en Consultar...`);
         await page.click(btnId);
 
-        // --- PASO 4: CAPTURAR RESULTADO ---
         console.log(`⏳ 8. Esperando respuesta final...`);
         await new Promise(r => setTimeout(r, 8000)); 
 
@@ -86,18 +89,15 @@ async function ejecutarScraping(cedula) {
             
             if (info) return info.innerText;
             if (error) return "ERROR: " + error.innerText;
-            if (tabla) return "EXITO: Datos encontrados en tabla.";
-            
-            return "No se pudo determinar el resultado. Verifique la cédula.";
+            if (tabla) return "EXITO: Datos encontrados.";
+            return "No se pudo determinar el resultado.";
         });
 
         console.log(`📄 9. RESULTADO: ${resultadoFinal}`);
-        
-        // Guardamos el resultado en Redis para que la API lo recoja
         await client.set(`resultado:${cedula}`, resultadoFinal, { EX: 3600 });
 
     } catch (error) {
-        console.error(`❌ ERROR:`, error.message);
+        console.error(`❌ ERROR EN SCRAPING:`, error.message);
         await client.set(`resultado:${cedula}`, `Error: ${error.message}`, { EX: 600 });
     } finally {
         await browser.close();
@@ -105,7 +105,7 @@ async function ejecutarScraping(cedula) {
     }
 }
 
-// Lógica de escucha constante de Redis
+// --- 4. INICIO DEL TRABAJADOR ---
 async function iniciarWorker() {
     try {
         if (!client.isOpen) await client.connect();
@@ -119,7 +119,7 @@ async function iniciarWorker() {
             }
         }
     } catch (err) {
-        console.error('🔴 Error en Worker/Redis:', err);
+        console.error('🔴 Error en Worker:', err);
         setTimeout(iniciarWorker, 5000); 
     }
 }
