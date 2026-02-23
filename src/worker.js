@@ -51,7 +51,7 @@ async function iniciarWorker() {
         }
     } catch (err) {
         console.error('🚀 Error crítico en el Worker:', err);
-        // Reintento automático en 5 segundos si falla la conexión
+        // Reintento automático en 5 segundos
         setTimeout(iniciarWorker, 5000);
     }
 }
