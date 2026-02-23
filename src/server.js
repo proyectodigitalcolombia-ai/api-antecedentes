@@ -1,59 +1,56 @@
 const express = require('express');
 const { createClient } = require('redis');
+
 const app = express();
-const PORT = process.env.PORT || 10000;
+const client = createClient({ url: process.env.REDIS_URL });
 
-// Configuración de Redis con reconexión automática
-const client = createClient({
-    url: process.env.REDIS_URL,
-    socket: {
-        reconnectStrategy: (retries) => Math.min(retries * 100, 3000)
-    }
-});
+client.on('error', err => console.log('Redis Client Error', err));
 
-client.on('error', (err) => console.log('❌ Error en Redis:', err));
+async function startServer() {
+    await client.connect();
 
-async function conectarRedis() {
-    try {
-        await client.connect();
-        console.log('✅ API conectada a Redis exitosamente');
-    } catch (err) {
-        console.error('🚀 Error conectando a Redis:', err);
-    }
-}
-conectarRedis();
+    // RUTA 1: Para ordenar la consulta
+    app.get('/consultar', async (req, res) => {
+        const { cedula } = req.query;
+        if (!cedula) return res.status(400).send('Falta la cédula');
 
-// RUTA DE SALUD: Para que Render no marque error en rojo
-app.get('/', (req, res) => res.status(200).send('API Funcionando 🚀'));
-app.get('/health', (req, res) => res.sendStatus(200));
-
-// RUTA PRINCIPAL DE CONSULTA
-app.get('/consultar', async (req, res) => {
-    const { cedula } = req.query;
-
-    if (!cedula) {
-        return res.status(400).json({ error: 'Falta el número de cédula' });
-    }
-
-    try {
-        // Encolar la tarea en Redis
-        await client.lPush('tareas_antecedentes', JSON.stringify({
-            cedula,
-            timestamp: new Date().toISOString()
-        }));
+        // Enviamos la tarea a la cola
+        await client.lPush('cola_consultas', JSON.stringify({ cedula }));
         
-        console.log(`📩 Tarea añadida para cédula: ${cedula}`);
         res.json({ 
-            status: 'success', 
-            message: 'Consulta enviada al bot', 
-            cedula 
+            mensaje: 'Consulta recibida y en proceso', 
+            cedula,
+            instrucciones: `Espera unos 60 segundos y visita /resultado?cedula=${cedula}`
         });
-    } catch (error) {
-        console.error('❌ Error al encolar:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
-    }
-});
+    });
 
-app.listen(PORT, () => {
-    console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-});
+    // RUTA 2: Para ver el resultado guardado por el Bot
+    app.get('/resultado', async (req, res) => {
+        const { cedula } = req.query;
+        if (!cedula) return res.status(400).send('Falta la cédula');
+
+        // Buscamos en Redis el resultado que guardó el Bot
+        const resultado = await client.get(`resultado:${cedula}`);
+
+        if (resultado) {
+            res.json({
+                cedula,
+                estado: 'Completado',
+                datos: resultado
+            });
+        } else {
+            res.json({
+                cedula,
+                estado: 'En espera',
+                mensaje: 'El bot aún está trabajando o la consulta no existe.'
+            });
+        }
+    });
+
+    const PORT = process.env.PORT || 10000;
+    app.listen(PORT, () => {
+        console.log(`🚀 API escuchando en puerto ${PORT}`);
+    });
+}
+
+startServer();
