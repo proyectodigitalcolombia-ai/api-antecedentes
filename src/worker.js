@@ -5,6 +5,8 @@ const client = createClient({
     url: process.env.REDIS_URL
 });
 
+client.on('error', (err) => console.log('❌ Error en Redis Worker:', err));
+
 async function consultarEnWeb(cedula) {
     console.log(`🔎 Iniciando búsqueda para: ${cedula}`);
     
@@ -21,15 +23,16 @@ async function consultarEnWeb(cedula) {
     try {
         const page = await browser.newPage();
         
-        // --- AQUÍ IRÁ LA LÓGICA DE CADA PÁGINA ---
-        await page.goto('https://www.google.com'); 
-        // -----------------------------------------
+        // --- PRUEBA INICIAL ---
+        await page.goto('https://www.google.com', { waitUntil: 'networkidle2' });
+        console.log(`✅ Página cargada correctamente para: ${cedula}`);
+        // -----------------------
 
-        console.log(`✅ Proceso completado para: ${cedula}`);
     } catch (error) {
-        console.error(`❌ Error en Puppeteer:`, error.message);
+        console.error(`❌ Error en Puppeteer para ${cedula}:`, error.message);
     } finally {
         await browser.close();
+        console.log(`Navegador cerrado para ${cedula}`);
     }
 }
 
@@ -39,6 +42,7 @@ async function iniciarWorker() {
         console.log('✅ Bot conectado y esperando tareas...');
 
         while (true) {
+            // brPop espera una tarea de la lista 'tareas_antecedentes'
             const tareaRaw = await client.brPop('tareas_antecedentes', 0);
             if (tareaRaw) {
                 const { cedula } = JSON.parse(tareaRaw.element);
@@ -46,7 +50,8 @@ async function iniciarWorker() {
             }
         }
     } catch (err) {
-        console.error('🚀 Error en Worker:', err);
+        console.error('🚀 Error crítico en el Worker:', err);
+        // Reintento automático en 5 segundos si falla la conexión
         setTimeout(iniciarWorker, 5000);
     }
 }
