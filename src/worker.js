@@ -2,8 +2,9 @@ const puppeteer = require('puppeteer');
 const { createClient } = require('redis');
 const express = require('express');
 const axios = require('axios');
+const fs = require('fs');
 
-// CONFIGURACIÓN CENTRAL
+// --- CONFIGURACIÓN ---
 const REDIS_URL = process.env.REDIS_URL;
 const API_KEY_2CAPTCHA = 'fd9177f1a724968f386c07483252b4e8';
 const CHROME_PATH = '/opt/render/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome';
@@ -11,7 +12,7 @@ const CHROME_PATH = '/opt/render/.cache/puppeteer/chrome/linux-121.0.6167.85/chr
 const client = createClient({ url: REDIS_URL });
 
 /**
- * Función para resolver reCAPTCHA v2 usando 2Captcha
+ * Resuelve el reCAPTCHA v2 inyectando el token en la página
  */
 async function resolverCaptcha(page) {
     try {
@@ -21,27 +22,29 @@ async function resolverCaptcha(page) {
             return element ? element.getAttribute('data-sitekey') : null;
         });
 
-        if (!siteKey) throw new Error("No se pudo extraer la SiteKey");
+        if (!siteKey) throw new Error("No se encontró la SiteKey en la página.");
 
         const pageUrl = 'https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml';
         
+        // 1. Enviar a 2Captcha
         const resp = await axios.get(`http://2captcha.com/in.php?key=${API_KEY_2CAPTCHA}&method=userrecaptcha&googlekey=${siteKey}&pageurl=${pageUrl}&json=1`);
         
-        if (resp.data.status !== 1) throw new Error("2Captcha rechazó el envío: " + resp.data.request);
+        if (resp.data.status !== 1) throw new Error("2Captcha rechazó la solicitud: " + resp.data.request);
         
         const requestId = resp.data.request;
-        console.log(`⏳ Captcha enviado (ID: ${requestId}). Esperando solución...`);
+        console.log(`⏳ Captcha enviado (ID: ${requestId}). Esperando resolución...`);
 
+        // 2. Poll (esperar respuesta)
         while (true) {
             await new Promise(r => setTimeout(r, 5000));
             const check = await axios.get(`http://2captcha.com/res.php?key=${API_KEY_2CAPTCHA}&action=get&id=${requestId}&json=1`);
             
             if (check.data.status === 1) {
                 console.log("✅ Captcha resuelto por el servicio.");
-                return check.data.request;
+                return check.data.request; // Este es el token
             }
             if (check.data.request !== 'CAPCHA_NOT_READY') {
-                throw new Error("Fallo en 2Captcha: " + check.data.request);
+                throw new Error("Error en 2Captcha: " + check.data.request);
             }
             console.log("... el experto sigue resolviendo ...");
         }
@@ -51,27 +54,27 @@ async function resolverCaptcha(page) {
 }
 
 /**
- * Lógica principal de Scraping
+ * Lógica principal de navegación y extracción
  */
 async function ejecutarScraping(cedula) {
     let browser;
     try {
         console.log(`--- 🤖 INICIANDO NUEVA CONSULTA: ${cedula} ---`);
-        
-        console.log(`🚀 Forzando apertura desde ruta física: ${CHROME_PATH}`);
+        console.log(`🚀 Intentando abrir Chrome en: ${CHROME_PATH}`);
 
         browser = await puppeteer.launch({
             executablePath: CHROME_PATH,
-            ignoreDefaultArgs: ['--disable-extensions'],
+            userDataDir: '/tmp/puppeteer_user_data',
             headless: "new",
             args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-gpu'
             ]
         });
 
+        console.log("✅ Navegador abierto con éxito.");
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
@@ -82,27 +85,28 @@ async function ejecutarScraping(cedula) {
         });
 
         // 1. Aceptar términos
-        await page.waitForSelector('#continuarBtn', { timeout: 15000 });
+        console.log("⚖️ Aceptando términos...");
+        await page.waitForSelector('#continuarBtn', { timeout: 20000 });
         await page.click('#continuarBtn');
-        console.log("✅ Términos aceptados.");
-
-        // 2. Llenar formulario
-        await page.waitForSelector('#form\\:cedulaInput', { timeout: 15000 });
+        
+        // 2. Formulario
+        console.log("✍️ Ingresando datos...");
+        await page.waitForSelector('#form\\:cedulaInput', { timeout: 20000 });
         await page.type('#form\\:cedulaInput', cedula.toString());
         await page.select('#form\\:tipoDocumento', '1');
-        console.log("✍️ Cédula ingresada.");
 
         // 3. Resolver Captcha
         const token = await resolverCaptcha(page);
         await page.evaluate((t) => {
             document.getElementById('g-recaptcha-response').innerHTML = t;
         }, token);
+        console.log("✅ Token de Captcha inyectado.");
 
         // 4. Consultar
         await page.click('#form\\:consultarBtn');
-        console.log("🖱️ Clic en consultar.");
+        console.log("🖱️ Consultando...");
 
-        // 5. Extraer Resultado
+        // 5. Resultado
         await page.waitForSelector('#form\\:panelResultado', { timeout: 30000 });
         const textoResultado = await page.evaluate(() => {
             return document.querySelector('#form\\:panelResultado').innerText;
@@ -116,7 +120,12 @@ async function ejecutarScraping(cedula) {
         }), { EX: 3600 });
 
     } catch (e) {
-        console.error(`❌ ERROR EN EL PROCESO (${cedula}): ${e.message}`);
+        console.error(`❌ ERROR CRÍTICO: ${e.message}`);
+        if (e.message.includes('Could not find Chrome')) {
+            if (fs.existsSync(CHROME_PATH)) {
+                console.log("📂 El ejecutable EXISTE pero Puppeteer no lo reconoce.");
+            }
+        }
         await client.set(`resultado:${cedula}`, JSON.stringify({ error: e.message }), { EX: 300 });
     } finally {
         if (browser) await browser.close();
@@ -124,7 +133,7 @@ async function ejecutarScraping(cedula) {
     }
 }
 
-// SERVIDOR DE SALUD Y ESCUCHA DE REDIS
+// --- ARRANQUE DEL SERVIDOR Y ESCUCHA ---
 const app = express();
 app.get('/', (req, res) => res.send('Worker Bot Activo 🤖'));
 
@@ -139,12 +148,10 @@ app.listen(PORT, '0.0.0.0', async () => {
             if (tarea) {
                 const data = JSON.parse(tarea.element);
                 const numCedula = data.cedula || data;
-                console.log(`🔔 ¡TAREA RECIBIDA!`);
                 await ejecutarScraping(numCedula);
-                console.log('👀 Esperando nueva tarea en "cola_consultas"...');
             }
         }
     } catch (err) {
-        console.error("Fallo crítico en el arranque del worker:", err);
+        console.error("Fallo crítico:", err);
     }
 });
