@@ -1,7 +1,6 @@
 {
   "name": "sistema-antecedentes",
-  "version": "1.0.0",
-  "description": "Bot de consultas multientidad",
+  "version": "1.0.1",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
