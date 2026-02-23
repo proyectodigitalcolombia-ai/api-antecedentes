@@ -1,14 +1,11 @@
-// 1. FORZADO DE ENTORNO 🛠️
-process.env.PUPPETEER_CACHE_DIR = '/opt/render/.cache/puppeteer';
-
 const puppeteer = require('puppeteer');
 const { createClient } = require('redis');
 const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 
-// --- CONFIGURACIÓN DE RUTAS ---
-// Esta es la ruta exacta donde el log de Render confirmó que instaló Chrome
+// --- 🛠️ CONFIGURACIÓN DE RUTAS CRÍTICAS ---
+// Forzamos la ruta donde Render instaló Chrome exitosamente
 const RUTA_CHROME = '/opt/render/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome';
 const REDIS_URL = process.env.REDIS_URL;
 const API_KEY_2CAPTCHA = 'fd9177f1a724968f386c07483252b4e8';
@@ -53,15 +50,18 @@ async function ejecutarScraping(cedula) {
     try {
         console.log(`--- 🤖 INICIANDO NUEVA CONSULTA: ${cedula} ---`);
 
-        // Verificación manual de existencia antes de lanzar
+        // 🔎 DIAGNÓSTICO: Verificar si el archivo realmente está ahí antes de intentar abrirlo
         if (fs.existsSync(RUTA_CHROME)) {
-            console.log(`✅ Binario encontrado en: ${RUTA_CHROME}`);
+            console.log(`✅ ¡ÉXITO! Binario de Chrome detectado en: ${RUTA_CHROME}`);
         } else {
-            console.error(`❌ ERROR: No hay nada en ${RUTA_CHROME}`);
+            console.error(`⚠️ ATENCIÓN: No se encuentra el archivo en la ruta esperada.`);
+            // Listar qué hay en la carpeta de caché para debuggear
+            const dirContenido = fs.readdirSync('/opt/render/.cache/puppeteer');
+            console.log(`Contenido de la carpeta cache: ${dirContenido.join(', ')}`);
         }
 
         browser = await puppeteer.launch({
-            executablePath: RUTA_CHROME, // <--- DIRECCIÓN FORZADA
+            executablePath: RUTA_CHROME, // <--- AQUÍ FORZAMOS EL MOTOR
             headless: "new",
             args: [
                 '--no-sandbox',
@@ -88,9 +88,9 @@ async function ejecutarScraping(cedula) {
         // 2. Ingresar Cédula
         await page.waitForSelector('#form\\:cedulaInput', { visible: true });
         await page.type('#form\\:cedulaInput', cedula.toString());
-        await page.select('#form\\:tipoDocumento', '1'); // '1' suele ser Cédula de Ciudadanía
+        await page.select('#form\\:tipoDocumento', '1');
 
-        // 3. Resolver y aplicar Captcha
+        // 3. Resolver Captcha
         const token = await resolverCaptcha(page);
         await page.evaluate((t) => {
             const el = document.getElementById('g-recaptcha-response');
@@ -98,14 +98,14 @@ async function ejecutarScraping(cedula) {
         }, token);
         console.log("✔️ Token de captcha aplicado.");
 
-        // 4. Consultar y capturar resultado
+        // 4. Consultar
         await page.click('#form\\:consultarBtn');
-        console.log("🛰️ Consultando...");
+        console.log("🛰️ Consultando resultados...");
         
         await page.waitForSelector('#form\\:panelResultado', { timeout: 30000 });
         const resultado = await page.evaluate(() => document.querySelector('#form\\:panelResultado').innerText);
 
-        console.log("📄 Resultado exitoso.");
+        console.log("📄 Resultado capturado correctamente.");
         await client.set(`resultado:${cedula}`, JSON.stringify({ 
             cedula, 
             resultado, 
@@ -126,25 +126,23 @@ async function ejecutarScraping(cedula) {
 
 // --- SERVIDOR Y BUCLE DE TAREAS ---
 const app = express();
-app.get('/', (req, res) => res.send('Worker está vivo y escuchando... 🤖'));
+app.get('/', (req, res) => res.send('Worker está vivo... 🤖'));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', async () => {
     try {
         if (!client.isOpen) await client.connect();
-        console.log("🚀 CONECTADO A REDIS. ESCUCHANDO TAREAS EN 'cola_consultas'...");
+        console.log("🚀 CONECTADO A REDIS. ESCUCHANDO TAREAS...");
         
         while (true) {
-            // Espera una tarea de la lista (bloqueante)
             const tarea = await client.brPop('cola_consultas', 0);
             if (tarea) {
                 const data = JSON.parse(tarea.element);
-                // Si la tarea es solo el número de cédula o un objeto {cedula: X}
                 const cedulaConsultar = data.cedula || data;
                 await ejecutarScraping(cedulaConsultar);
             }
         }
     } catch (err) {
-        console.error("🔴 Error crítico en el bucle del Worker:", err);
+        console.error("🔴 Error crítico:", err);
     }
 });
