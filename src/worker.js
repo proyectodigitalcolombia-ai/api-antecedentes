@@ -2,36 +2,11 @@ const puppeteer = require('puppeteer');
 const { createClient } = require('redis');
 const express = require('express');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
 
-// --- ⚙️ CONFIGURACIÓN ---
+// --- CONFIGURACIÓN ---
 const REDIS_URL = process.env.REDIS_URL;
 const API_KEY_2CAPTCHA = 'fd9177f1a724968f386c07483252b4e8';
-
 const client = createClient({ url: REDIS_URL });
-
-/**
- * BUSCADOR DE ÉLITE 🕵️‍♂️
- * Usa el comando 'find' de Linux para localizar el ejecutable real de Chrome.
- */
-function localizarChrome() {
-    try {
-        console.log("🔍 Rastreando ubicación de Chrome...");
-        // Buscamos en la raíz de la caché de Render
-        const comando = "find /opt/render/.cache/puppeteer -type f -name chrome | grep 'chrome-linux64/chrome' | head -n 1";
-        const ruta = execSync(comando).toString().trim();
-        
-        if (ruta) return ruta;
-        
-        // Búsqueda secundaria si la primera falla
-        return execSync("find /opt/render/project/src/.cache -type f -name chrome | head -n 1").toString().trim();
-    } catch (e) {
-        console.log("⚠️ No se pudo usar 'find', se intentará lanzamiento estándar.");
-        return null;
-    }
-}
 
 async function resolverCaptcha(page) {
     try {
@@ -65,23 +40,13 @@ async function ejecutarScraping(cedula) {
     try {
         console.log(`--- 🤖 INICIANDO CONSULTA: ${cedula} ---`);
 
-        const rutaChrome = localizarChrome();
-        
-        if (rutaChrome) {
-            console.log(`🎯 ¡CHROME LOCALIZADO EN!: ${rutaChrome}`);
-        } else {
-            console.log("⚠️ Advertencia: No se encontró ruta específica. Usando default.");
-        }
-
         browser = await puppeteer.launch({
-            executablePath: rutaChrome || undefined,
             headless: "new",
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--single-process'
+                '--disable-gpu'
             ]
         });
 
@@ -94,25 +59,19 @@ async function ejecutarScraping(cedula) {
             timeout: 60000 
         });
 
-        // Paso 1: Aceptar términos
         await page.waitForSelector('#continuarBtn', { visible: true });
         await page.click('#continuarBtn');
-        console.log("✔️ Términos aceptados.");
         
-        // Paso 2: Datos
         await page.waitForSelector('#form\\:cedulaInput', { visible: true });
         await page.type('#form\\:cedulaInput', cedula.toString());
         await page.select('#form\\:tipoDocumento', '1');
 
-        // Paso 3: Captcha
         const token = await resolverCaptcha(page);
         await page.evaluate((t) => {
             const el = document.getElementById('g-recaptcha-response');
             if (el) el.innerHTML = t;
         }, token);
-        console.log("✔️ Token aplicado.");
 
-        // Paso 4: Resultado
         await page.click('#form\\:consultarBtn');
         console.log("🛰️ Procesando respuesta...");
         
@@ -128,19 +87,15 @@ async function ejecutarScraping(cedula) {
 
     } catch (e) {
         console.error(`❌ ERROR: ${e.message}`);
-        await client.set(`resultado:${cedula}`, JSON.stringify({ 
-            error: e.message, 
-            timestamp: new Date().toISOString() 
-        }), { EX: 300 });
+        await client.set(`resultado:${cedula}`, JSON.stringify({ error: e.message }), { EX: 300 });
     } finally {
         if (browser) await browser.close();
         console.log(`--- 🏁 FIN DE TAREA: ${cedula} ---`);
     }
 }
 
-// --- SERVIDOR ---
 const app = express();
-app.get('/', (req, res) => res.send('Worker Activo 🤖'));
+app.get('/', (req, res) => res.send('Bot Activo 🤖'));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', async () => {
