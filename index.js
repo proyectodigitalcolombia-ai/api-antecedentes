@@ -1,80 +1,75 @@
 const express = require('express');
 const { createClient } = require('redis');
 const app = express();
-const port = process.env.PORT || 10000;
 
 // Configuración de Redis
 const client = createClient({
     url: process.env.REDIS_URL
 });
 
-client.on('error', (err) => console.log('🔴 Redis Client Error', err));
+client.on('error', (err) => console.log('❌ Error en Redis Client', err));
 
-// Conexión inicial a Redis
-async function connectRedis() {
-    try {
-        await client.connect();
-        console.log('✅ Conectado a Redis desde la API');
-    } catch (err) {
-        console.error('❌ Error conectando a Redis:', err);
-    }
-}
-connectRedis();
+// Middleware para leer JSON
+app.use(express.json());
 
-// Ruta para recibir la consulta
+// --- RUTAS ---
+
+// 1. Ruta de Salud (Para que Render se ponga en VERDE)
+app.get('/', (req, res) => {
+    res.status(200).send('🚀 API Principal: Sistema en línea y escuchando.');
+});
+
+// 2. Ruta para recibir consultas
 app.get('/consultar', async (req, res) => {
     const { cedula } = req.query;
 
     if (!cedula) {
-        return res.status(400).json({ error: 'Debes proporcionar un número de cédula' });
+        return res.status(400).json({ error: "Falta el número de cédula" });
     }
 
     try {
-        // 1. Borrar cualquier resultado previo para esta cédula para evitar confusiones
-        await client.del(`resultado:${cedula}`);
+        if (!client.isOpen) await client.connect();
 
-        // 2. Enviar a la cola de Redis (el worker la recogerá)
-        const tarea = JSON.stringify({ cedula, timestamp: Date.now() });
-        await client.lPush('cola_consultas', tarea);
-
-        console.log(`📡 Cédula ${cedula} enviada a la cola`);
+        // Enviamos la tarea a la cola de Redis
+        await client.lPush('cola_consultas', JSON.stringify({ cedula }));
+        
+        console.log(`🔔 Cédula ${cedula} añadida a la cola.`);
 
         res.json({
-            mensaje: 'Consulta recibida y en proceso',
-            cedula,
-            instrucciones: `Consulta el estado en: /resultado/${cedula}`
+            mensaje: "Consulta recibida y en proceso",
+            cedula: cedula,
+            estado: "Pendiente"
         });
-    } catch (err) {
-        res.status(500).json({ error: 'Error al procesar la solicitud en Redis' });
+    } catch (error) {
+        console.error("❌ Error al conectar con Redis:", error);
+        res.status(500).json({ error: "Error interno del servidor" });
     }
 });
 
-// Ruta para ver el resultado
+// 3. Ruta para verificar resultados
 app.get('/resultado/:cedula', async (req, res) => {
     const { cedula } = req.params;
-
     try {
+        if (!client.isOpen) await client.connect();
         const resultado = await client.get(`resultado:${cedula}`);
-
+        
         if (resultado) {
-            res.json({ cedula, estado: resultado });
+            res.json({ cedula, resultado: JSON.parse(resultado) });
         } else {
-            res.json({ 
-                cedula, 
-                estado: 'Pendiente', 
-                detalle: 'El bot aún está procesando la solicitud o resolviendo el captcha. Reintenta en 15 segundos.' 
-            });
+            res.json({ cedula, estado: "Aún en proceso o no encontrado" });
         }
-    } catch (err) {
-        res.status(500).json({ error: 'Error al consultar el resultado' });
+    } catch (error) {
+        res.status(500).json({ error: "Error al obtener resultado" });
     }
 });
 
-// Ruta de salud
-app.get('/', (req, res) => {
-    res.send('🚀 API de Antecedentes Activa y Conectada');
-});
+// --- ARRANQUE DEL SERVIDOR ---
 
-app.listen(port, '0.0.0.0', () => {
-    console.log(`🚀 API Principal escuchando en el puerto ${port}`);
+const PORT = process.env.PORT || 10000;
+
+// Escuchamos en 0.0.0.0 para que Render nos vea desde afuera
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`--- ✅ SERVIDOR API INICIADO ---`);
+    console.log(`🚀 API Principal escuchando en el puerto ${PORT}`);
+    console.log(`🔗 URL de prueba: http://localhost:${PORT}/`);
 });
