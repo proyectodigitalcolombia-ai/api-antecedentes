@@ -3,48 +3,57 @@ const { createClient } = require('redis');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Configuración de Redis
+// Configuración de Redis con reconexión automática
 const client = createClient({
-    url: process.env.REDIS_URL
+    url: process.env.REDIS_URL,
+    socket: {
+        reconnectStrategy: (retries) => Math.min(retries * 100, 3000)
+    }
 });
 
 client.on('error', (err) => console.log('❌ Error en Redis:', err));
 
-async function conectar() {
+async function conectarRedis() {
     try {
         await client.connect();
-        console.log('✅ API conectada a Redis');
+        console.log('✅ API conectada a Redis exitosamente');
     } catch (err) {
         console.error('🚀 Error conectando a Redis:', err);
     }
 }
-conectar();
+conectarRedis();
 
-// Ruta para que Render sepa que la API está viva
-app.get('/', (req, res) => {
-    res.send('Servidor de Antecedentes Activo 🚀');
-});
+// RUTA DE SALUD: Para que Render no marque error en rojo
+app.get('/', (req, res) => res.status(200).send('API Funcionando 🚀'));
+app.get('/health', (req, res) => res.sendStatus(200));
 
-// Ruta para recibir la cédula: Ej: /consultar?cedula=12345
+// RUTA PRINCIPAL DE CONSULTA
 app.get('/consultar', async (req, res) => {
     const { cedula } = req.query;
 
     if (!cedula) {
-        return res.status(400).json({ error: 'Falta la cédula' });
+        return res.status(400).json({ error: 'Falta el número de cédula' });
     }
 
     try {
+        // Encolar la tarea en Redis
         await client.lPush('tareas_antecedentes', JSON.stringify({
             cedula,
-            fecha: new Date().toISOString()
+            timestamp: new Date().toISOString()
         }));
-        console.log(`📩 Cédula encolada: ${cedula}`);
-        res.json({ mensaje: 'Consulta en proceso', cedula });
+        
+        console.log(`📩 Tarea añadida para cédula: ${cedula}`);
+        res.json({ 
+            status: 'success', 
+            message: 'Consulta enviada al bot', 
+            cedula 
+        });
     } catch (error) {
-        res.status(500).json({ error: 'Error al encolar' });
+        console.error('❌ Error al encolar:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor API corriendo en puerto ${PORT}`);
+    console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
