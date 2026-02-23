@@ -1,43 +1,64 @@
+// 1. Configuración de entorno PRIORITARIA 🛠️
+// Esto corrige el error de la "r" faltante en la ruta de caché
+process.env.PUPPETEER_CACHE_DIR = '/opt/render/.cache/puppeteer';
+
 const puppeteer = require('puppeteer');
 const { createClient } = require('redis');
 const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 
-// --- CONFIGURACIÓN ---
+// --- CONFIGURACIÓN DE RUTAS Y APIS ---
 const REDIS_URL = process.env.REDIS_URL;
 const API_KEY_2CAPTCHA = 'fd9177f1a724968f386c07483252b4e8';
-
-// 🛡️ RUTA MANUAL: Confirmamos que tenga la "r" al final de puppeteer
 const RUTA_CHROME = '/opt/render/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome';
 
 const client = createClient({ url: REDIS_URL });
 
+/**
+ * Función para resolver el captcha usando 2Captcha 🧩
+ */
 async function resolverCaptcha(page) {
-    // ... (lógica de captcha se mantiene igual)
+    try {
+        console.log("🧩 Obteniendo SiteKey...");
+        const siteKey = await page.evaluate(() => {
+            const element = document.querySelector('.g-recaptcha');
+            return element ? element.getAttribute('data-sitekey') : null;
+        });
+
+        if (!siteKey) throw new Error("No se encontró SiteKey");
+
+        const pageUrl = 'https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml';
+        const resp = await axios.get(`http://2captcha.com/in.php?key=${API_KEY_2CAPTCHA}&method=userrecaptcha&googlekey=${siteKey}&pageurl=${pageUrl}&json=1`);
+        
+        const requestId = resp.data.request;
+        console.log(`⏳ Esperando resolución (ID: ${requestId})...`);
+
+        while (true) {
+            await new Promise(r => setTimeout(r, 5000));
+            const check = await axios.get(`http://2captcha.com/res.php?key=${API_KEY_2CAPTCHA}&action=get&id=${requestId}&json=1`);
+            if (check.data.status === 1) return check.data.request;
+            if (check.data.request !== 'CAPCHA_NOT_READY') throw new Error(check.data.request);
+        }
+    } catch (e) {
+        throw new Error("Fallo en Captcha: " + e.message);
+    }
 }
 
+/**
+ * Proceso principal de Scraping 🤖
+ */
 async function ejecutarScraping(cedula) {
     let browser;
     try {
         console.log(`--- 🤖 INICIANDO CONSULTA: ${cedula} ---`);
 
-        // 🔍 DIAGNÓSTICO DE RUTA
-        console.log(`🔎 Verificando existencia de Chrome en: ${RUTA_CHROME}`);
-        if (fs.existsSync(RUTA_CHROME)) {
-            console.log("✅ ¡El archivo de Chrome existe en la ruta especificada!");
-        } else {
-            console.log("❌ ERROR: El archivo NO existe ahí.");
-            // Intentamos ver qué hay en la carpeta de nivel superior para rastrear el error
-            try {
-                const carpetasBase = fs.readdirSync('/opt/render/.cache/puppeteer');
-                console.log(`📁 Contenido real de la caché: ${carpetasBase.join(', ')}`);
-            } catch (err) {
-                console.log("⚠️ No se pudo leer la carpeta /opt/render/.cache/puppeteer");
-            }
+        // Verificación de seguridad en logs 🔍
+        console.log(`🔎 Verificando Chrome en: ${RUTA_CHROME}`);
+        if (!fs.existsSync(RUTA_CHROME)) {
+            console.error("❌ ERROR CRÍTICO: El binario de Chrome no existe en la ruta.");
         }
 
-        // 🚀 LANZAMIENTO
         browser = await puppeteer.launch({
             executablePath: RUTA_CHROME,
             headless: "new",
@@ -50,13 +71,40 @@ async function ejecutarScraping(cedula) {
         });
 
         const page = await browser.newPage();
-        // ... (resto del proceso de scraping)
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+
+        console.log("🔗 Cargando página de la Policía...");
+        await page.goto('https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml', { 
+            waitUntil: 'networkidle2', 
+            timeout: 60000 
+        });
+
+        // Paso 1: Botón continuar
+        await page.waitForSelector('#continuarBtn');
+        await page.click('#continuarBtn');
         
+        // Paso 2: Llenar datos
+        await page.waitForSelector('#form\\:cedulaInput');
+        await page.type('#form\\:cedulaInput', cedula.toString());
+        await page.select('#form\\:tipoDocumento', '1');
+
+        // Paso 3: Resolver Captcha
+        const token = await resolverCaptcha(page);
+        await page.evaluate((t) => {
+            const el = document.getElementById('g-recaptcha-response');
+            if (el) el.innerHTML = t;
+        }, token);
+
+        // Paso 4: Consultar y capturar resultado
+        await page.click('#form\\:consultarBtn');
+        await page.waitForSelector('#form\\:panelResultado', { timeout: 30000 });
+        const resultado = await page.evaluate(() => document.querySelector('#form\\:panelResultado').innerText);
+
         console.log("📄 Resultado obtenido con éxito.");
-        await client.set(`resultado:${cedula}`, JSON.stringify({ cedula, resultado: "Éxito", fecha: new Date() }), { EX: 3600 });
+        await client.set(`resultado:${cedula}`, JSON.stringify({ cedula, resultado, fecha: new Date() }), { EX: 3600 });
 
     } catch (e) {
-        console.error(`❌ FALLO CRÍTICO: ${e.message}`);
+        console.error(`❌ FALLO: ${e.message}`);
         await client.set(`resultado:${cedula}`, JSON.stringify({ error: e.message }), { EX: 300 });
     } finally {
         if (browser) await browser.close();
@@ -64,19 +112,24 @@ async function ejecutarScraping(cedula) {
     }
 }
 
-// --- SERVIDOR Y ESCUCHA ---
+// --- SERVIDOR PARA MANTENER EL WORKER ACTIVO ---
 const app = express();
-app.get('/', (req, res) => res.send('Worker con diagnóstico activo 🛠️'));
+app.get('/', (req, res) => res.send('Worker Activo y Configurado 🤖'));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', async () => {
-    if (!client.isOpen) await client.connect();
-    console.log("🚀 ESCUCHANDO TAREAS...");
-    while (true) {
-        const tarea = await client.brPop('cola_consultas', 0);
-        if (tarea) {
-            const data = JSON.parse(tarea.element);
-            await ejecutarScraping(data.cedula || data);
+    try {
+        if (!client.isOpen) await client.connect();
+        console.log("🚀 CONECTADO A REDIS. ESCUCHANDO TAREAS...");
+        
+        while (true) {
+            const tarea = await client.brPop('cola_consultas', 0);
+            if (tarea) {
+                const data = JSON.parse(tarea.element);
+                await ejecutarScraping(data.cedula || data);
+            }
         }
+    } catch (err) {
+        console.error("Fallo en el bucle principal:", err);
     }
 });
