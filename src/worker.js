@@ -11,7 +11,7 @@ const CHROME_PATH = '/opt/render/.cache/puppeteer/chrome/linux-121.0.6167.85/chr
 const client = createClient({ url: REDIS_URL });
 
 /**
- * Función para resolver reCAPTCHA v2
+ * Función para resolver reCAPTCHA v2 usando 2Captcha
  */
 async function resolverCaptcha(page) {
     try {
@@ -25,15 +25,13 @@ async function resolverCaptcha(page) {
 
         const pageUrl = 'https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml';
         
-        // 1. Enviar a 2Captcha
         const resp = await axios.get(`http://2captcha.com/in.php?key=${API_KEY_2CAPTCHA}&method=userrecaptcha&googlekey=${siteKey}&pageurl=${pageUrl}&json=1`);
         
         if (resp.data.status !== 1) throw new Error("2Captcha rechazó el envío: " + resp.data.request);
         
         const requestId = resp.data.request;
-        console.log(`⏳ Captcha enviado a 2Captcha (ID: ${requestId}). Esperando solución...`);
+        console.log(`⏳ Captcha enviado (ID: ${requestId}). Esperando solución...`);
 
-        // 2. Poll para obtener el token (espera de 30 a 90 segundos normalmente)
         while (true) {
             await new Promise(r => setTimeout(r, 5000));
             const check = await axios.get(`http://2captcha.com/res.php?key=${API_KEY_2CAPTCHA}&action=get&id=${requestId}&json=1`);
@@ -45,26 +43,33 @@ async function resolverCaptcha(page) {
             if (check.data.request !== 'CAPCHA_NOT_READY') {
                 throw new Error("Fallo en 2Captcha: " + check.data.request);
             }
-            console.log("... el captcha sigue en proceso ...");
+            console.log("... el experto sigue resolviendo ...");
         }
     } catch (error) {
-        throw new Error("Error en flujo de Captcha: " + error.message);
+        throw new Error("Fallo en resolución de Captcha: " + error.message);
     }
 }
 
 /**
- * Lógica de navegación y extracción
+ * Lógica principal de Scraping
  */
 async function ejecutarScraping(cedula) {
     let browser;
     try {
-        console.log(`--- 🤖 INICIANDO CONSULTA: ${cedula} ---`);
+        console.log(`--- 🤖 INICIANDO NUEVA CONSULTA: ${cedula} ---`);
         
+        console.log(`🚀 Forzando apertura desde ruta física: ${CHROME_PATH}`);
+
         browser = await puppeteer.launch({
             executablePath: CHROME_PATH,
             ignoreDefaultArgs: ['--disable-extensions'],
             headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage',
+                '--disable-gpu'
+            ]
         });
 
         const page = await browser.newPage();
@@ -76,35 +81,34 @@ async function ejecutarScraping(cedula) {
             timeout: 60000 
         });
 
-        // Paso 1: Términos
+        // 1. Aceptar términos
         await page.waitForSelector('#continuarBtn', { timeout: 15000 });
         await page.click('#continuarBtn');
         console.log("✅ Términos aceptados.");
 
-        // Paso 2: Datos
+        // 2. Llenar formulario
         await page.waitForSelector('#form\\:cedulaInput', { timeout: 15000 });
         await page.type('#form\\:cedulaInput', cedula.toString());
         await page.select('#form\\:tipoDocumento', '1');
         console.log("✍️ Cédula ingresada.");
 
-        // Paso 3: Captcha
+        // 3. Resolver Captcha
         const token = await resolverCaptcha(page);
         await page.evaluate((t) => {
             document.getElementById('g-recaptcha-response').innerHTML = t;
         }, token);
 
-        // Paso 4: Consultar
+        // 4. Consultar
         await page.click('#form\\:consultarBtn');
-        console.log("🖱️ Clic en consultar realizado.");
+        console.log("🖱️ Clic en consultar.");
 
-        // Paso 5: Extraer Resultado
-        // Esperamos a que el panel de resultados aparezca (puede tardar por la carga del sitio)
+        // 5. Extraer Resultado
         await page.waitForSelector('#form\\:panelResultado', { timeout: 30000 });
         const textoResultado = await page.evaluate(() => {
             return document.querySelector('#form\\:panelResultado').innerText;
         });
 
-        console.log("📄 Información extraída.");
+        console.log("📄 Información extraída correctamente.");
         await client.set(`resultado:${cedula}`, JSON.stringify({ 
             cedula, 
             resultado: textoResultado,
@@ -112,7 +116,7 @@ async function ejecutarScraping(cedula) {
         }), { EX: 3600 });
 
     } catch (e) {
-        console.error(`❌ ERROR: ${e.message}`);
+        console.error(`❌ ERROR EN EL PROCESO (${cedula}): ${e.message}`);
         await client.set(`resultado:${cedula}`, JSON.stringify({ error: e.message }), { EX: 300 });
     } finally {
         if (browser) await browser.close();
@@ -120,9 +124,9 @@ async function ejecutarScraping(cedula) {
     }
 }
 
-// ARRANQUE DEL SERVIDOR Y WORKER
+// SERVIDOR DE SALUD Y ESCUCHA DE REDIS
 const app = express();
-app.get('/', (req, res) => res.send('Worker Activo y Operando 🤖'));
+app.get('/', (req, res) => res.send('Worker Bot Activo 🤖'));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', async () => {
@@ -135,11 +139,12 @@ app.listen(PORT, '0.0.0.0', async () => {
             if (tarea) {
                 const data = JSON.parse(tarea.element);
                 const numCedula = data.cedula || data;
+                console.log(`🔔 ¡TAREA RECIBIDA!`);
                 await ejecutarScraping(numCedula);
-                console.log('👀 Esperando siguiente tarea...');
+                console.log('👀 Esperando nueva tarea en "cola_consultas"...');
             }
         }
     } catch (err) {
-        console.error("Fallo crítico en el worker:", err);
+        console.error("Fallo crítico en el arranque del worker:", err);
     }
 });
