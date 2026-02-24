@@ -17,7 +17,7 @@ app.get('/consultar', async (req, res) => {
 
     try {
         await client.lPush('cola_consultas', JSON.stringify({ cedula }));
-        res.json({ status: "Recibido", mensaje: `La cédula ${cedula} está en cola.` });
+        res.json({ status: "Recibido", mensaje: `Cédula ${cedula} enviada al Bot.` });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
