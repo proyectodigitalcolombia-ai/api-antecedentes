@@ -6,14 +6,14 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 10000;
 app.get('/', (req, res) => res.send('Bot Online 🤖'));
-app.listen(PORT, '0.0.0.0', () => console.log(`- Keep-alive activo -`));
+app.listen(PORT, '0.0.0.0', () => console.log(`- Puerto ${PORT} activo -`));
 
 const solver = new Solver(process.env.API_KEY_2CAPTCHA);
 const client = redis.createClient({ url: process.env.REDIS_URL });
 
 async function iniciarBot() {
     await client.connect();
-    console.log('🤖 Bot esperando tareas en Redis...');
+    console.log('🤖 Bot listo para la prueba final...');
 
     while (true) {
         try {
@@ -33,8 +33,7 @@ async function procesarConsulta(cedula) {
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox',
-            '--disable-blink-features=AutomationControlled', // Evita que detecten que es un bot
-            '--lang=es-ES,es'
+            '--disable-blink-features=AutomationControlled'
         ]
     });
     
@@ -42,8 +41,18 @@ async function procesarConsulta(cedula) {
     
     try {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+        
+        // --- PASO A: ENTRAR POR LA RAÍZ PARA GANAR COOKIES ---
+        console.log('🌐 Accediendo a la raíz (WebJudicial/)...');
+        await page.goto('https://antecedentes.policia.gov.co:7005/WebJudicial/', {
+            waitUntil: 'networkidle2',
+            timeout: 60000 
+        });
 
-        console.log('🌐 Navegando a WebJudicial...');
+        await new Promise(r => setTimeout(r, 3000)); // Espera estratégica
+
+        // --- PASO B: NAVEGAR AL FORMULARIO ---
+        console.log('📄 Saltando al formulario de antecedentes...');
         await page.goto('https://antecedentes.policia.gov.co:7005/WebJudicial/antecedentes.xhtml', {
             waitUntil: 'networkidle2',
             timeout: 60000 
@@ -59,28 +68,23 @@ async function procesarConsulta(cedula) {
                 await new Promise(r => setTimeout(r, 3000));
             }
         } catch (e) {
-            console.log('ℹ️ No se vio el checkbox (posible carga directa).');
+            console.log('ℹ️ No se vio el checkbox, buscando Captcha directamente...');
         }
 
-        // Búsqueda de Captcha con múltiples selectores
-        console.log('🧠 Buscando imagen del Captcha...');
-        const captchaSelector = 'img[id*="cap"], img[src*="captcha"], img[id*="Captcha"]';
+        // Búsqueda de Captcha
+        const captchaSelector = 'img[src*="captcha"], img[id*="cap"], img[id*="Captcha"]';
+        const captchaImg = await page.waitForSelector(captchaSelector, { timeout: 25000 });
         
-        const captchaImg = await page.waitForSelector(captchaSelector, { timeout: 25000 }).catch(async () => {
-            const contenido = await page.evaluate(() => document.body.innerText.substring(0, 300));
-            console.error(`❌ La página no mostró el captcha. Texto detectado: "${contenido}"`);
-            throw new Error('Captcha no encontrado');
-        });
-
+        console.log('🧠 Captcha encontrado. Resolviendo...');
         const screenshot = await captchaImg.screenshot({ encoding: 'base64' });
         const res = await solver.imageCaptcha(screenshot);
-        console.log(`✅ Captcha resuelto: ${res.data}`);
+        console.log(`✅ Solución: ${res.data}`);
 
-        // Llenado de formulario
+        // Llenado
         await page.type('input[id*="cedula"]', cedula);
         await page.type('input[id*="captcha"], input[id*="answer"]', res.data);
         
-        console.log('🚀 Enviando consulta...');
+        console.log('🚀 Consultando...');
         await page.click('button[id*="consultar"], input[type="submit"]');
         
         await new Promise(r => setTimeout(r, 6000));
@@ -89,13 +93,13 @@ async function procesarConsulta(cedula) {
             const text = document.body.innerText;
             if (text.includes('No tiene asuntos pendientes')) return "LIMPIO";
             if (text.includes('registra antecedentes')) return "CON ANTECEDENTES";
-            return "RESULTADO NO CLARO / POSIBLE ERROR";
+            return "ERROR: Página no cargó resultado final.";
         });
 
-        console.log(`🏁 FIN: ${cedula} -> ${resultado}`);
+        console.log(`🏁 RESULTADO: ${cedula} -> ${resultado}`);
 
     } catch (error) {
-        console.error(`❌ Fallo crítico: ${error.message}`);
+        console.error(`❌ Fallo en prueba final: ${error.message}`);
     } finally {
         await browser.close();
         console.log(`📦 Sesión cerrada.`);
