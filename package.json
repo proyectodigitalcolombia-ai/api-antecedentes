@@ -1,10 +1,10 @@
 {
   "name": "api-antecedentes",
   "version": "1.0.0",
-  "description": "Bot de consulta judicial con modo sigilo",
-  "main": "index.js",
+  "description": "Bot de consulta judicial con modo sigilo y proxy rotativo",
+  "main": "worker.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node worker.js",
     "worker": "node worker.js"
   },
   "dependencies": {
