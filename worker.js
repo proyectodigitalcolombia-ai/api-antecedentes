@@ -1,54 +1,73 @@
-const express = require('express');
 const redis = require('redis');
-const cors = require('cors');
-
-const app = express();
-app.use(cors());
-app.use(express.json());
+const puppeteer = require('puppeteer');
+const { Solver } = require('2captcha-javascript');
+const http = require('http');
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://default:xU5AJJoh3pN1wo9dQqExFAiKJgKUFM0T@red-d6d4md5m5p6s73f5i2jg:6379';
-const redisClient = redis.createClient({ url: REDIS_URL });
+const solver = new Solver(process.env.TWO_CAPTCHA_KEY);
+const client = redis.createClient({ url: REDIS_URL });
 
-redisClient.on('error', (err) => console.error('❌ Error Redis API:', err));
+// Servidor de mantenimiento para que Render no apague el bot
+http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end("Bot de Antecedentes Activo");
+}).listen(10000);
 
-(async () => {
-    await redisClient.connect();
-    console.log("🚀 API conectada a Redis");
-})();
-
-// Ruta de salud para Render
-app.get('/', (req, res) => res.send('API Principal Live'));
-
-// 1. Endpoint para mandar la cédula al Bot
-app.get('/consultar', async (req, res) => {
-    const { cedula } = req.query;
-    if (!cedula) return res.status(400).json({ error: "Falta cédula" });
+async function realizarNavegacion(cedula) {
+    const browser = await puppeteer.launch({
+        headless: "new",
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    });
 
     try {
-        const tarea = { cedula, timestamp: new Date().toISOString() };
-        await redisClient.rPush('cola_consultas', JSON.stringify(tarea));
+        const page = await browser.newPage();
+        console.log(`🌐 Iniciando Puppeteer para cédula: ${cedula}`);
         
-        // Limpiamos resultados anteriores de esa cédula para evitar confusiones
-        await redisClient.del(`resultado:${cedula}`);
+        // --- AQUÍ VA LA LÓGICA DE LA POLICÍA ---
+        await page.goto('https://srvandroid.policia.gov.co/Antecedentes/', { waitUntil: 'networkidle2' });
 
-        res.json({ ok: true, mensaje: "Consulta en proceso", cedula });
-    } catch (error) {
-        res.status(500).json({ error: "Error al encolar" });
-    }
-});
+        // Ejemplo de flujo (ajustar selectores si es necesario):
+        await page.click('#radAcepto'); 
+        await page.click('#btnContinuar');
 
-// 2. Endpoint para obtener el resultado final
-app.get('/resultado/:cedula', async (req, res) => {
-    const { cedula } = req.params;
-    try {
-        const data = await redisClient.get(`resultado:${cedula}`);
-        if (!data) return res.json({ estado: "procesando", mensaje: "El bot sigue trabajando..." });
+        await page.waitForSelector('#imgCaptcha');
+        const captchaImg = await page.$('#imgCaptcha');
+        const captchaBase64 = await captchaImg.screenshot({ encoding: 'base64' });
         
-        res.json(JSON.parse(data));
-    } catch (error) {
-        res.status(500).json({ error: "Error al consultar" });
-    }
-});
+        console.log("🧩 Resolviendo captcha...");
+        const resCaptcha = await solver.imageCaptcha(captchaBase64);
+        console.log(`✅ Captcha resuelto: ${resCaptcha.data}`);
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`✅ API en puerto ${PORT}`));
+        await page.type('#txtDocumento', cedula);
+        await page.type('#txtCaptcha', resCaptcha.data);
+        await page.click('#btnConsultar');
+
+        await page.waitForSelector('#lblMensaje', { timeout: 15000 });
+        const texto = await page.$eval('#lblMensaje', el => el.innerText);
+
+        // --- GUARDAR RESULTADO ---
+        const infoFinal = { status: "exito", data: texto, actualizado: new Date() };
+        await client.set(`resultado:${cedula}`, JSON.stringify(infoFinal), { EX: 86400 });
+        console.log(`🏆 Resultado guardado para ${cedula}`);
+
+    } catch (error) {
+        console.error("🚨 Error en proceso:", error.message);
+        await client.set(`resultado:${cedula}`, JSON.stringify({ status: "error", msg: error.message }), { EX: 3600 });
+    } finally {
+        await browser.close();
+    }
+}
+
+async function iniciar() {
+    await client.connect();
+    console.log("🚀 BOT (WORKER) LISTO. Esperando tareas en Redis...");
+    
+    while (true) {
+        // BLPOP espera hasta que llegue una tarea a la cola
+        const tarea = await client.blPop('cola_consultas', 0);
+        const { cedula } = JSON.parse(tarea.element);
+        await realizarNavegacion(cedula);
+    }
+}
+
+iniciar().catch(console.error);
