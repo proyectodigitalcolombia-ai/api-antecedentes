@@ -1,8 +1,22 @@
-"dependencies": {
+{
+  "name": "api-antecedentes",
+  "version": "1.0.0",
+  "description": "Bot de consulta judicial con modo sigilo y proxy rotativo",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js",
+    "worker": "node worker.js",
+    "postinstall": "echo 'Skipping browser download'"
+  },
+  "dependencies": {
     "2captcha": "^3.0.7",
     "express": "^4.18.2",
-    "puppeteer-core": "^21.0.0", 
+    "puppeteer-core": "^21.0.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "redis": "^4.6.10"
+  },
+  "engines": {
+    "node": "20.x"
+  }
 }
