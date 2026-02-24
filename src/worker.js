@@ -3,6 +3,7 @@ const { createClient } = require('redis');
 const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
+const path = require('path');
 const { execSync } = require('child_process');
 
 // --- ⚙️ CONFIGURACIÓN ---
@@ -10,34 +11,32 @@ const REDIS_URL = process.env.REDIS_URL;
 const API_KEY_2CAPTCHA = 'fd9177f1a724968f386c07483252b4e8';
 const client = createClient({ url: REDIS_URL });
 
-/**
- * 🔍 BUSCADOR DE EMERGENCIA
- * Esta función ignora lo que diga Puppeteer y busca el archivo físicamente.
- */
 function encontrarChrome() {
-    const rutasPosibles = [
-        '/opt/render/project/src/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome',
-        '/opt/render/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome'
-    ];
+    // 1. Intentamos buscar en la carpeta .cache que creamos en el build
+    const rutaLocal = path.join(__dirname, '../.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome');
+    
+    // 2. Intentamos la ruta absoluta de Render
+    const rutaAbsoluta = '/opt/render/project/src/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome';
 
-    for (const ruta of rutasPosibles) {
-        if (fs.existsSync(ruta)) {
-            console.log(`✅ Chrome encontrado en ruta conocida: ${ruta}`);
-            return ruta;
-        }
+    if (fs.existsSync(rutaLocal)) {
+        console.log(`✅ Chrome encontrado localmente: ${rutaLocal}`);
+        return rutaLocal;
+    }
+    if (fs.existsSync(rutaAbsoluta)) {
+        console.log(`✅ Chrome encontrado en ruta absoluta: ${rutaAbsoluta}`);
+        return rutaAbsoluta;
     }
 
     try {
-        console.log("⚠️ Ruta estándar no hallada, rastreando disco con 'find'...");
+        console.log("⚠️ Buscando ejecutable 'chrome' en todo el proyecto...");
         const hallazgo = execSync("find /opt/render -type f -name chrome | grep 'chrome-linux64/chrome' | head -n 1").toString().trim();
         if (hallazgo) {
-            console.log(`🎯 Chrome localizado mediante rastreo: ${hallazgo}`);
+            console.log(`🎯 Chrome localizado mediante find: ${hallazgo}`);
             return hallazgo;
         }
     } catch (e) {
-        console.log("❌ El comando 'find' falló.");
+        console.log("❌ Error en búsqueda profunda.");
     }
-
     return null;
 }
 
@@ -74,20 +73,12 @@ async function ejecutarScraping(cedula) {
         console.log(`--- 🤖 INICIANDO CONSULTA: ${cedula} ---`);
 
         const rutaEjecutable = encontrarChrome();
-        if (!rutaEjecutable) {
-            throw new Error("No se pudo localizar el ejecutable de Chrome en ninguna ruta.");
-        }
+        if (!rutaEjecutable) throw new Error("No se localizó el ejecutable de Chrome.");
 
         browser = await puppeteer.launch({
             executablePath: rutaEjecutable,
             headless: "new",
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--single-process'
-            ]
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process']
         });
 
         const page = await browser.newPage();
@@ -116,4 +107,36 @@ async function ejecutarScraping(cedula) {
         console.log("🛰️ Procesando respuesta...");
         
         await page.waitForSelector('#form\\:panelResultado', { timeout: 45000 });
-        const
+        const resultado = await page.evaluate(() => document.querySelector('#form\\:panelResultado').innerText);
+
+        console.log("📄 ¡ÉXITO! Datos recuperados.");
+        await client.set(`resultado:${cedula}`, JSON.stringify({ cedula, resultado, fecha: new Date().toISOString() }), { EX: 3600 });
+
+    } catch (e) {
+        console.error(`❌ ERROR: ${e.message}`);
+        await client.set(`resultado:${cedula}`, JSON.stringify({ error: e.message }), { EX: 300 });
+    } finally {
+        if (browser) await browser.close();
+        console.log(`--- 🏁 FIN DE TAREA: ${cedula} ---`);
+    }
+}
+
+const app = express();
+app.get('/', (req, res) => res.send('Worker Activo 🤖'));
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, '0.0.0.0', async () => {
+    try {
+        if (!client.isOpen) await client.connect();
+        console.log("🚀 WORKER CONECTADO Y ESPERANDO TAREAS.");
+        while (true) {
+            const tarea = await client.brPop('cola_consultas', 0);
+            if (tarea) {
+                const data = JSON.parse(tarea.element);
+                await ejecutarScraping(data.cedula || data);
+            }
+        }
+    } catch (err) {
+        console.error("Error en bucle principal:", err);
+    }
+});
