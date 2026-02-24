@@ -6,15 +6,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Configuración de Redis
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_URL = 'redis://default:xU5AJJoh3pN1wo9dQqExFAiKJgKUFM0T@red-d6d4md5m5p6s73f5i2jg:6379';
 const NOMBRE_COLA = 'cola_consultas';
 
 const redisClient = redis.createClient({ url: REDIS_URL });
 
 redisClient.on('error', (err) => console.error('❌ Error en Redis (API):', err));
 
-// Conexión inicial
 (async () => {
     try {
         await redisClient.connect();
@@ -24,37 +22,30 @@ redisClient.on('error', (err) => console.error('❌ Error en Redis (API):', err)
     }
 })();
 
-// Endpoint para recibir la cédula
+// 🚩 ESTO ES LO QUE FALTA PARA EL COLOR VERDE
+app.get('/', (req, res) => {
+    res.status(200).send('API Principal funcionando correctamente');
+});
+
 app.get('/consultar', async (req, res) => {
     const { cedula } = req.query;
-
-    if (!cedula) {
-        return res.status(400).json({ error: "Falta el parámetro 'cedula'" });
-    }
+    if (!cedula) return res.status(400).json({ error: "Falta cédula" });
 
     try {
-        const tarea = {
-            cedula: cedula,
-            timestamp: new Date().toISOString()
-        };
-
-        // Empujar la tarea a la cola que el Worker escucha
+        const tarea = { cedula, timestamp: new Date().toISOString() };
+        
+        // Enviamos a Redis
         await redisClient.rPush(NOMBRE_COLA, JSON.stringify(tarea));
         
-        console.log(`📡 Cédula ${cedula} enviada al Worker.`);
-
-        res.status(200).json({
-            ok: true,
-            mensaje: "Consulta en cola. El bot está procesando.",
-            cedula
-        });
+        console.log(`📡 Cédula ${cedula} enviada a la cola.`);
+        res.status(200).json({ ok: true, mensaje: "Enviado al bot", cedula });
     } catch (error) {
-        res.status(500).json({ error: "Error al conectar con la cola de tareas." });
+        console.error("Error al enviar:", error);
+        res.status(500).json({ error: "Error de conexión con Redis" });
     }
 });
 
-// Puerto para Render
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`✅ API Principal corriendo en el puerto ${PORT}`);
+    console.log(`✅ API escuchando en puerto ${PORT}`);
 });
