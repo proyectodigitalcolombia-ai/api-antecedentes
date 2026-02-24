@@ -1,7 +1,7 @@
 {
-  "name": "sistema-antecedentes",
+  "name": "api-antecedentes-bot",
   "version": "1.0.0",
-  "description": "Sistema de consulta de antecedentes con API y Bot",
+  "description": "Sistema de API + Bot con Puppeteer",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -13,6 +13,6 @@
     "puppeteer": "21.11.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "20.x"
   }
 }
