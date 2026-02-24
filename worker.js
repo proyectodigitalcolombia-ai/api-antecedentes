@@ -6,10 +6,10 @@ const { Solver } = require('2captcha');
 
 puppeteer.use(StealthPlugin());
 
+// Servidor de salud obligatorio para Render
 const app = express();
-const PORT = process.env.PORT || 10000;
 app.get('/health', (req, res) => res.status(200).send('OK'));
-app.listen(PORT, '0.0.0.0', () => console.log(`✅ Servidor activo en puerto ${PORT}`));
+app.listen(process.env.PORT || 10000);
 
 const solver = new Solver(process.env.API_KEY_2CAPTCHA);
 const client = redis.createClient({ url: process.env.REDIS_URL });
@@ -18,13 +18,11 @@ async function misionPolicia(cedula) {
     const proxyUrl = `http://${process.env.PROXY_USER}:${process.env.PROXY_PASS}@${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
 
     const browser = await puppeteer.launch({
-        // ESTA LÍNEA ES LA QUE HACE QUE SEA RÁPIDO:
-        executablePath: '/usr/bin/google-chrome', 
+        executablePath: '/usr/bin/google-chrome',
         headless: "new",
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
-            '--ignore-certificate-errors',
             `--proxy-server=${proxyUrl}`
         ]
     });
@@ -32,13 +30,13 @@ async function misionPolicia(cedula) {
     const page = await browser.newPage();
 
     try {
-        console.log(`🇨🇴 Conectando a Policía Nacional...`);
+        console.log(`\n🔎 [${cedula}] Conectando a Policía Nacional...`);
         await page.goto('https://antecedentes.policia.gov.co:7005/WebJudicial/antecedentes.xhtml', { 
             waitUntil: 'networkidle2', 
             timeout: 60000 
         });
 
-        // Lógica de aceptación
+        // Aceptar términos
         await page.evaluate(() => {
             const ck = document.querySelector('input[type="checkbox"]');
             if (ck) ck.click();
@@ -46,28 +44,35 @@ async function misionPolicia(cedula) {
             if (btn) btn.click();
         });
 
-        console.log("🧩 Túnel abierto y términos aceptados.");
+        console.log(`✅ [${cedula}] Túnel establecido. Entrando a formulario...`);
         
-        // Aquí seguiría la resolución del captcha...
-        return { nombre: "IDENTIFICANDO...", estado: "PROCESANDO" };
+        // Aquí puedes seguir con la lógica del captcha que ya tienes...
+        // ...
 
+        return true;
     } catch (e) {
-        console.error("❌ Error de conexión:", e.message);
-        return null;
+        console.error(`❌ [${cedula}] Error:`, e.message);
+        return false;
     } finally {
         await browser.close();
     }
 }
 
 async function iniciar() {
-    await client.connect();
-    console.log("🤖 Master Worker listo.");
-    while (true) {
-        const tarea = await client.brPop('cola_consultas', 0);
-        if (tarea) {
-            const { cedula } = JSON.parse(tarea.element);
-            await misionPolicia(cedula);
+    try {
+        await client.connect();
+        console.log("🤖 Master Worker iniciado y escuchando Redis...");
+
+        while (true) {
+            const tarea = await client.brPop('cola_consultas', 0);
+            if (tarea) {
+                const { cedula } = JSON.parse(tarea.element);
+                await misionPolicia(cedula);
+            }
         }
+    } catch (err) {
+        console.error("Error en el loop del Worker:", err);
+        setTimeout(iniciar, 5000);
     }
 }
 
