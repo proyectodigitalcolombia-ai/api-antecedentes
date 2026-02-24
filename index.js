@@ -1,33 +1,29 @@
 const express = require('express');
 const redis = require('redis');
 const app = express();
-const PORT = process.env.PORT || 10000;
 
-// Configuración de conexión a Redis
-const client = redis.createClient({ 
-    url: process.env.REDIS_URL,
-    socket: { reconnectStrategy: (retries) => Math.min(retries * 50, 2000) }
-});
+const client = redis.createClient({ url: process.env.REDIS_URL });
 
-client.on('error', err => console.log('❌ Error en Redis:', err));
+client.on('error', (err) => console.log('Error en Redis:', err));
+
+async function connectRedis() {
+    await client.connect();
+    console.log('🚀 API conectada a Redis');
+}
+connectRedis();
 
 app.get('/consultar', async (req, res) => {
     const { cedula } = req.query;
-    if (!cedula) return res.status(400).send({ error: 'Falta la cédula en la URL' });
+    if (!cedula) return res.status(400).json({ error: 'Falta la cédula' });
 
     try {
-        if (!client.isOpen) await client.connect();
-        
-        // Empujamos la cédula a la lista 'cola_consultas'
+        // Usamos 'cola_consultas' como nombre clave
         await client.lPush('cola_consultas', cedula);
-        
-        res.send({ 
-            status: "Recibido", 
-            mensaje: `La cédula ${cedula} ha sido enviada al Bot.` 
-        });
+        res.json({ status: 'Recibido', mensaje: `La cédula ${cedula} está en fila.` });
     } catch (error) {
-        res.status(500).send({ error: error.message });
+        res.status(500).json({ error: error.message });
     }
 });
 
-app.listen(PORT, () => console.log(`🚀 API Principal lista en puerto ${PORT}`));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`🚀 API en puerto ${PORT}`));
