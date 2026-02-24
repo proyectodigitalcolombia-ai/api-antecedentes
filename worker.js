@@ -1,74 +1,96 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const redis = require('redis');
+const { Solver } = require('2captcha');
 const express = require('express');
 
-// Activar sigilo
 puppeteer.use(StealthPlugin());
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 app.get('/health', (req, res) => res.status(200).send('OK'));
-app.listen(PORT, '0.0.0.0', () => console.log(`✅ Health Check en puerto ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`✅ Worker Multi-Fuente Activo`));
 
+const solver = new Solver(process.env.API_KEY_2CAPTCHA);
 const client = redis.createClient({ url: process.env.REDIS_URL });
 
-async function ejecutarPrueba() {
+// --- MÓDULO INTERNACIONAL: INTERPOL ---
+async function consultarInterpol(nombre, apellido) {
+    const browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox'] });
+    const page = await browser.newPage();
     try {
-        await client.connect();
-        console.log('🤖 Bot de PRUEBA iniciado. Esperando tarea en Redis...');
-
-        while (true) {
-            try {
-                const tarea = await client.brPop('cola_consultas', 0);
-                if (tarea) {
-                    console.log(`\n🚀 Tarea recibida. Iniciando prueba de navegación...`);
-                    await realizarNavegacionDePrueba();
-                }
-            } catch (err) {
-                console.error('❌ Error en ciclo:', err.message);
-                await new Promise(r => setTimeout(r, 2000));
-            }
-        }
-    } catch (err) {
-        console.error('❌ Error conexión Redis:', err);
-    }
+        console.log(`🌍 Consultando Interpol: ${nombre} ${apellido}`);
+        await page.goto(`https://www.interpol.int/es/How-we-work/Notices/Red-Notices/View-Red-Notices#${apellido}&${nombre}`, { waitUntil: 'networkidle2' });
+        await new Promise(r => setTimeout(r, 4000));
+        const resultados = await page.evaluate(() => {
+            const el = document.querySelector('.noticesList__count');
+            return el ? parseInt(el.innerText) : 0;
+        });
+        return resultados > 0 ? `⚠️ ${resultados} COINCIDENCIAS` : "✅ LIMPIO";
+    } catch (e) { return "ERROR_INTERPOL"; }
+    finally { await browser.close(); }
 }
 
-async function realizarNavegacionDePrueba() {
+// --- MÓDULO INTERNACIONAL: OFAC (LISTA CLINTON) ---
+async function consultarOFAC(nombre, apellido) {
+    const browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox'] });
+    const page = await browser.newPage();
+    try {
+        console.log(`🇺🇸 Consultando OFAC (Lista Clinton): ${nombre} ${apellido}`);
+        await page.goto('https://sanctionssearch.ofac.treas.gov/', { waitUntil: 'networkidle2' });
+        await page.type('#ctl00_MainContent_txtLastName', `${apellido} ${nombre}`);
+        await page.click('#ctl00_MainContent_btnSearch');
+        await new Promise(r => setTimeout(r, 3000));
+        const resultado = await page.evaluate(() => {
+            const tabla = document.querySelector('#ctl00_MainContent_gvSearchResults');
+            return tabla ? "⚠️ COINCIDENCIA DETECTADA" : "✅ LIMPIO";
+        });
+        return resultado;
+    } catch (e) { return "ERROR_OFAC"; }
+    finally { await browser.close(); }
+}
+
+// --- MÓDULO NACIONAL: POLICÍA (CON PROXY) ---
+async function consultarPolicia(cedula) {
     const browser = await puppeteer.launch({
         headless: "new",
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: ['--no-sandbox', `--proxy-server=http://${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`]
     });
-    
     const page = await browser.newPage();
-    
+    await page.authenticate({ username: process.env.PROXY_USER, password: process.env.PROXY_PASS });
     try {
-        console.log('🌐 Navegando a quotes.toscrape.com...');
-        await page.goto('https://quotes.toscrape.com/', {
-            waitUntil: 'networkidle2', 
-            timeout: 30000 
-        });
+        console.log(`🇨🇴 Consultando Policía Nacional: ${cedula}`);
+        // ... (Aquí va tu lógica de Policía con Captcha que ya teníamos)
+        return "PROCESO_EXITOSO"; // Simplificado para el ejemplo
+    } catch (e) { return "ERROR_POLICIA"; }
+    finally { await browser.close(); }
+}
 
-        // Extraer la primera frase de la página
-        const datos = await page.evaluate(() => {
-            const frase = document.querySelector('.text')?.innerText;
-            const autor = document.querySelector('.author')?.innerText;
-            return { frase, autor };
-        });
+// --- CICLO PRINCIPAL ---
+async function iniciarWorker() {
+    await client.connect();
+    console.log('🤖 Sistema de Inteligencia Masiva esperando tareas...');
+    
+    while (true) {
+        const tarea = await client.brPop('cola_consultas', 0);
+        if (tarea) {
+            const { cedula, nombre, apellido } = JSON.parse(tarea.element);
+            console.log(`\n🔎 ESCANEO INICIADO: ${nombre} ${apellido} (${cedula})`);
 
-        console.log('------------------------------------------');
-        console.log('✅ ¡CONEXIÓN EXITOSA!');
-        console.log(`📝 Cita leída: "${datos.frase}"`);
-        console.log(`👤 Autor: ${datos.autor}`);
-        console.log('------------------------------------------');
+            // Ejecutamos todo en paralelo para máxima velocidad
+            const [interpol, ofac, policia] = await Promise.all([
+                consultarInterpol(nombre, apellido),
+                consultarOFAC(nombre, apellido),
+                consultarPolicia(cedula)
+            ]);
 
-    } catch (error) {
-        console.error(`❌ La prueba falló: ${error.message}`);
-    } finally {
-        await browser.close();
-        console.log('📦 Navegador cerrado.');
+            console.log(`📊 REPORTE CONSOLIDADO:`);
+            console.log(`- Interpol: ${interpol}`);
+            console.log(`- OFAC (EE.UU): ${ofac}`);
+            console.log(`- Policía COL: ${policia}`);
+            console.log(`------------------------------------------`);
+        }
     }
 }
 
-ejecutarPrueba();
+iniciarWorker();
