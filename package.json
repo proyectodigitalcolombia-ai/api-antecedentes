@@ -1,19 +1,14 @@
 {
-  "name": "api-antecedentes",
+  "name": "api-principal",
   "version": "1.0.0",
-  "description": "Bot de consulta de antecedentes",
-  "main": "src/worker.js",
+  "description": "API para recibir consultas y enviarlas a Redis",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/worker.js",
-    "build": "npm install && npx puppeteer browsers install chrome"
+    "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.6.0",
     "express": "^4.18.2",
-    "puppeteer": "^21.5.0",
-    "redis": "^4.6.10"
-  },
-  "engines": {
-    "node": ">=20.0.0"
+    "redis": "^4.6.10",
+    "cors": "^2.8.5"
   }
 }
