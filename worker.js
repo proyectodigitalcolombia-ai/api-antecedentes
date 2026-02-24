@@ -1,12 +1,16 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const redis = require('redis');
 const { Solver } = require('2captcha');
 const express = require('express');
 
+// Activar el modo sigilo
+puppeteer.use(StealthPlugin());
+
 const app = express();
 const PORT = process.env.PORT || 10000;
 app.get('/health', (req, res) => res.status(200).send('OK'));
-app.listen(PORT, '0.0.0.0', () => console.log(`✅ Servidor de salud activo`));
+app.listen(PORT, '0.0.0.0', () => console.log(`✅ Health Check activo`));
 
 const solver = new Solver(process.env.API_KEY_2CAPTCHA);
 const client = redis.createClient({ url: process.env.REDIS_URL });
@@ -14,14 +18,14 @@ const client = redis.createClient({ url: process.env.REDIS_URL });
 async function ejecutarServicio() {
     try {
         await client.connect();
-        console.log('🤖 Bot Sniper listo. Esperando tareas...');
+        console.log('🤖 Bot Stealth operativo. Esperando tareas...');
 
         while (true) {
             try {
                 const tarea = await client.brPop('cola_consultas', 0);
                 if (tarea) {
                     const { cedula } = JSON.parse(tarea.element);
-                    console.log(`\n🔎 INICIANDO MISIÓN: ${cedula}`);
+                    console.log(`\n🔎 CONSULTANDO: ${cedula}`);
                     await procesarConsulta(cedula);
                 }
             } catch (err) {
@@ -30,7 +34,7 @@ async function ejecutarServicio() {
             }
         }
     } catch (err) {
-        console.error('❌ Error conexión Redis:', err);
+        console.error('❌ Fallo conexión Redis:', err);
     }
 }
 
@@ -40,71 +44,63 @@ async function procesarConsulta(cedula) {
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
-            '--disable-blink-features=AutomationControlled'
+            '--disable-dev-shm-usage',
+            '--window-size=1280,800'
         ]
     });
     
     const page = await browser.newPage();
     
     try {
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-        await page.setViewport({ width: 1280, height: 800 });
+        // Configuraciones extra de humanidad
+        await page.setExtraHTTPHeaders({ 'Accept-Language': 'es-ES,es;q=0.9' });
 
-        console.log('🌐 Navegando a la Policía...');
+        console.log('🌐 Navegando con Stealth Mode...');
         await page.goto('https://antecedentes.policia.gov.co:7005/WebJudicial/antecedentes.xhtml', {
             waitUntil: 'networkidle2', timeout: 60000 
         });
 
-        await new Promise(r => setTimeout(r, 6000));
+        await new Promise(r => setTimeout(r, 7000));
 
-        // --- 1. CLIC FÍSICO EN CHECKBOX ---
-        console.log('🎯 Apuntando al Checkbox...');
-        const checkbox = await page.$('input[type="checkbox"]');
-        if (checkbox) {
-            const box = await checkbox.boundingBox();
-            if (box) {
-                await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-                console.log(`🖱️ Clic físico en Checkbox enviado a [${box.x}, ${box.y}]`);
+        // --- MANEJO DE TÉRMINOS CON CLIC FÍSICO ---
+        const necesitaTerminos = await page.evaluate(() => document.body.innerText.includes('Términos de uso'));
+
+        if (necesitaTerminos) {
+            console.log('📝 Aceptando términos con simulador de mouse...');
+            
+            const checkbox = await page.$('input[type="checkbox"]');
+            if (checkbox) {
+                const box = await checkbox.boundingBox();
+                await page.mouse.click(box.x + 2, box.y + 2); // Clic en la esquina del checkbox
+                await new Promise(r => setTimeout(r, 1000));
             }
-        }
 
-        await new Promise(r => setTimeout(r, 2000));
+            const btn = await page.evaluateHandle(() => {
+                return Array.from(document.querySelectorAll('button, input[type="submit"]'))
+                    .find(b => b.innerText.includes('Aceptar') || b.id.includes('continuar'));
+            });
 
-        // --- 2. CLIC FÍSICO EN BOTÓN ACEPTAR ---
-        console.log('🎯 Apuntando al Botón Aceptar...');
-        const boton = await page.evaluateHandle(() => {
-            return Array.from(document.querySelectorAll('button, input[type="submit"], .ui-button'))
-                .find(b => b.innerText.toLowerCase().includes('aceptar') || b.id.toLowerCase().includes('continuar'));
-        });
-
-        if (boton && boton.asElement()) {
-            const btnBox = await boton.asElement().boundingBox();
-            if (btnBox) {
+            if (btn && btn.asElement()) {
+                const btnBox = await btn.asElement().boundingBox();
                 await page.mouse.click(btnBox.x + btnBox.width / 2, btnBox.y + btnBox.height / 2);
-                console.log(`🖱️ Clic físico en Botón enviado a [${btnBox.x}, ${btnBox.y}]`);
+                console.log('🖱️ Clic físico en Aceptar.');
             }
+
+            await page.keyboard.press('Enter');
+            await new Promise(r => setTimeout(r, 12000));
         }
 
-        // Refuerzo con Enter
-        await page.keyboard.press('Enter');
-        console.log('⏳ Esperando transición al Captcha (12s)...');
-        await new Promise(r => setTimeout(r, 12000));
-
-        // --- 3. CAPTCHA ---
+        // --- CAPTCHA ---
         const captchaSelector = 'img[src*="captcha"], img[id*="cap"], img[src*="Servlet"]';
-        const captchaImg = await page.waitForSelector(captchaSelector, { timeout: 15000 }).catch(async () => {
-            const txt = await page.evaluate(() => document.body.innerText.substring(0, 200));
-            throw new Error(`Seguimos atrapados en términos. Texto: ${txt}`);
-        });
-
-        console.log('📸 Captcha detectado. Resolviendo...');
+        const captchaImg = await page.waitForSelector(captchaSelector, { timeout: 20000 });
+        
+        console.log('📸 Captcha encontrado. Resolviendo...');
         const screenshot = await captchaImg.screenshot({ encoding: 'base64' });
         const res = await solver.imageCaptcha(screenshot);
-        console.log(`✅ Solución: ${res.data}`);
-
-        // --- 4. LLENADO Y RESULTADO ---
-        await page.type('input[id*="cedula"]', cedula, { delay: 100 });
-        await page.type('input[id*="captcha"]', res.data, { delay: 100 });
+        
+        // --- LLENADO ---
+        await page.type('input[id*="cedula"]', cedula, { delay: 150 });
+        await page.type('input[id*="captcha"]', res.data, { delay: 150 });
         await page.keyboard.press('Enter');
 
         await new Promise(r => setTimeout(r, 8000));
@@ -113,13 +109,14 @@ async function procesarConsulta(cedula) {
             const t = document.body.innerText;
             if (t.includes('No tiene asuntos pendientes')) return "LIMPIO";
             if (t.includes('registra antecedentes')) return "CON ANTECEDENTES";
-            return "ERROR_DESCONOCIDO";
+            return "RESULTADO_NO_CLARO";
         });
 
-        console.log(`🏁 RESULTADO PARA ${cedula}: ${veredicto}`);
+        console.log(`🏁 FINAL: ${cedula} -> ${veredicto}`);
 
     } catch (error) {
-        console.error(`❌ Fallo en misión: ${error.message}`);
+        const errorText = await page.evaluate(() => document.body.innerText.substring(0, 150));
+        console.error(`❌ Fallo: ${error.message}. Pantalla: ${errorText}`);
     } finally {
         await browser.close();
         console.log('📦 Sesión cerrada.');
