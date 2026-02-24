@@ -3,14 +3,12 @@ FROM ghcr.io/puppeteer/puppeteer:21.11.0
 USER root
 WORKDIR /app
 
-# Copiamos el manual de instrucciones
+# Copiamos solo el package para instalar dependencias primero (mejor para el cache)
 COPY package.json ./
-
-# Instalamos las librerías
 RUN npm install --no-package-lock
 
-# Copiamos el código
+# Copiamos todo lo demás
 COPY . .
 
-# Ejecutamos el bot
+# El bot usa el script "worker" definido en el package.json
 CMD ["npm", "run", "worker"]
