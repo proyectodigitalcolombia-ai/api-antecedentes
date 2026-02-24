@@ -10,6 +10,9 @@ const REDIS_URL = process.env.REDIS_URL;
 const API_KEY_2CAPTCHA = 'fd9177f1a724968f386c07483252b4e8';
 const client = createClient({ url: REDIS_URL });
 
+/**
+ * 🧩 RESOLVER CAPTCHA
+ */
 async function resolverCaptcha(page) {
     try {
         console.log("🧩 Obteniendo SiteKey para 2Captcha...");
@@ -37,19 +40,18 @@ async function resolverCaptcha(page) {
     }
 }
 
+/**
+ * 🤖 LÓGICA DE SCRAPING
+ */
 async function ejecutarScraping(cedula) {
     let browser;
     try {
         console.log(`--- 🤖 INICIANDO CONSULTA: ${cedula} ---`);
 
-        // 📍 RUTA DINÁMICA BASADA EN TU LOG EXITOSO
+        // Ruta persistente donde copiamos Chrome en el Build Command
         const rutaChrome = path.join(process.cwd(), '.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome');
         
         console.log(`🔍 Verificando ejecutable en: ${rutaChrome}`);
-        
-        if (!fs.existsSync(rutaChrome)) {
-            console.log("⚠️ Advertencia: La ruta persistente no se detecta. Intentando con ruta de sistema...");
-        }
 
         browser = await puppeteer.launch({
             executablePath: fs.existsSync(rutaChrome) ? rutaChrome : undefined,
@@ -72,7 +74,6 @@ async function ejecutarScraping(cedula) {
             timeout: 60000 
         });
 
-        // Interacción
         await page.waitForSelector('#continuarBtn', { visible: true });
         await page.click('#continuarBtn');
         
@@ -80,7 +81,6 @@ async function ejecutarScraping(cedula) {
         await page.type('#form\\:cedulaInput', cedula.toString());
         await page.select('#form\\:tipoDocumento', '1');
 
-        // Resolver Captcha
         const token = await resolverCaptcha(page);
         await page.evaluate((t) => {
             const el = document.getElementById('g-recaptcha-response');
@@ -109,17 +109,29 @@ async function ejecutarScraping(cedula) {
     }
 }
 
-// Servidor básico para Render
+/**
+ * 🌐 SERVIDOR EXPRESS PARA RENDER (HEALTH CHECK)
+ */
 const app = express();
-app.get('/', (req, res) => res.send('Worker Activo 🤖'));
+app.get('/', (req, res) => res.send('Worker Activo y Operativo 🤖'));
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Servidor Express escuchando en puerto ${PORT}`);
+    // Una vez que el servidor responde a Render, iniciamos el bucle de Redis
+    iniciarProcesamientoRedis();
+});
+
+/**
+ * 📥 BUCLE DE PROCESAMIENTO REDIS
+ */
+async function iniciarProcesamientoRedis() {
     try {
         if (!client.isOpen) await client.connect();
-        console.log("🚀 WORKER CONECTADO Y ESPERANDO COLA.");
+        console.log("🚀 CONECTADO A REDIS. ESPERANDO TAREAS...");
         
         while (true) {
+            // brPop bloquea la ejecución hasta que haya una tarea
             const tarea = await client.brPop('cola_consultas', 0);
             if (tarea) {
                 const data = JSON.parse(tarea.element);
@@ -127,6 +139,8 @@ app.listen(PORT, '0.0.0.0', async () => {
             }
         }
     } catch (err) {
-        console.error("Error en conexión Redis:", err);
+        console.error("❌ Error en conexión Redis:", err);
+        // Reintentar conexión tras 5 segundos si falla
+        setTimeout(iniciarProcesamientoRedis, 5000);
     }
-});
+}
