@@ -1,7 +1,7 @@
 {
   "name": "api-antecedentes-bot",
   "version": "1.0.0",
-  "description": "Sistema de API + Bot con Puppeteer",
+  "description": "Sistema de API + Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -9,8 +9,7 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "redis": "^4.6.10",
-    "puppeteer": "21.11.0"
+    "redis": "^4.6.10"
   },
   "engines": {
     "node": "20.x"
