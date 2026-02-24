@@ -1,71 +1,58 @@
-const puppeteer = require('puppeteer');
+const express = require('express');
 const redis = require('redis');
-const http = require('http'); // Necesario para el Health Check
+const cors = require('cors');
 
-// 1. SERVIDOR DE SALUD (Para que Render se ponga en VERDE)
-const PORT = process.env.PORT || 10000;
-http.createServer((req, res) => {
-    res.writeHead(200);
-    res.end('Worker is Live');
-}).listen(PORT, () => {
-    console.log(`✅ Health Check activo en puerto ${PORT}`);
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const REDIS_URL = process.env.REDIS_URL || 'redis://default:xU5AJJoh3pN1wo9dQqExFAiKJgKUFM0T@red-d6d4md5m5p6s73f5i2jg:6379';
+const redisClient = redis.createClient({ url: REDIS_URL });
+
+redisClient.on('error', (err) => console.error('❌ Error Redis API:', err));
+
+(async () => {
+    try {
+        await redisClient.connect();
+        console.log("🚀 API Principal conectada a Redis");
+    } catch (err) {
+        console.error("🚨 Error conectando API a Redis:", err);
+    }
+})();
+
+// Ruta para que Render sepa que la API está viva
+app.get('/', (req, res) => res.send('API Principal funcionando correctamente.'));
+
+// Recibir cédula: /consultar?cedula=12345
+app.get('/consultar', async (req, res) => {
+    const { cedula } = req.query;
+    if (!cedula) return res.status(400).json({ error: "Falta el parámetro cedula" });
+
+    try {
+        const tarea = { cedula, timestamp: new Date().toISOString() };
+        await redisClient.rPush('cola_consultas', JSON.stringify(tarea));
+        
+        // Borramos cualquier resultado viejo de esta cédula para evitar datos obsoletos
+        await redisClient.del(`resultado:${cedula}`);
+
+        res.json({ ok: true, mensaje: "Consulta en cola. El bot está trabajando.", cedula });
+    } catch (error) {
+        res.status(500).json({ error: "Error al enviar a la cola" });
+    }
 });
 
-// 2. CONFIGURACIÓN REDIS
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-const NOMBRE_COLA = 'cola_consultas'; 
-
-const client = redis.createClient({ url: REDIS_URL });
-client.on('error', (err) => console.log('❌ Error en Redis Client:', err));
-
-async function iniciarWorker() {
+// Consultar resultado: /resultado/12345
+app.get('/resultado/:cedula', async (req, res) => {
+    const { cedula } = req.params;
     try {
-        console.log("⏳ Conectando a Redis...");
-        await client.connect();
-        console.log("🚀 REDIS: Conectado con éxito.");
-
-        while (true) {
-            console.log(`📡 Esperando mensajes en [${NOMBRE_COLA}]...`);
-            
-            // blPop espera hasta que llegue un mensaje
-            const registro = await client.blPop(NOMBRE_COLA, 0);
-            
-            if (registro) {
-                const data = JSON.parse(registro.element);
-                console.log(`🔎 TRABAJO RECIBIDO: Cédula ${data.cedula}`);
-
-                let browser;
-                try {
-                    browser = await puppeteer.launch({
-                        headless: "new",
-                        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-                        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-                    });
-
-                    const page = await browser.newPage();
-                    
-                    // ===========================================================
-                    // 🚩 TU LÓGICA DE NAVEGACIÓN AQUÍ 🚩
-                    // ===========================================================
-                    console.log(`🌐 Navegando para: ${data.cedula}`);
-                    
-                    // Ejemplo:
-                    // await page.goto('https://página-destino.com');
-                    // ===========================================================
-
-                    console.log(`✅ PROCESO COMPLETADO para: ${data.cedula}`);
-
-                } catch (err) {
-                    console.error(`❌ Error en Puppeteer:`, err.message);
-                } finally {
-                    if (browser) await browser.close();
-                }
-            }
-        }
+        const data = await redisClient.get(`resultado:${cedula}`);
+        if (!data) return res.json({ estado: "procesando", mensaje: "El bot aún no termina." });
+        
+        res.json(JSON.parse(data));
     } catch (error) {
-        console.error("🚨 ERROR CRÍTICO:", error);
-        setTimeout(iniciarWorker, 5000);
+        res.status(500).json({ error: "Error al consultar Redis" });
     }
-}
+});
 
-iniciarWorker();
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`✅ API Principal escuchando en puerto ${PORT}`));
