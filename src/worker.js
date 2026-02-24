@@ -19,13 +19,13 @@ async function resolverCaptcha(page) {
             return el ? el.getAttribute('data-sitekey') : null;
         });
 
-        if (!siteKey) throw new Error("No se encontró SiteKey");
+        if (!siteKey) throw new Error("No se encontró SiteKey en la página");
 
         const pageUrl = 'https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml';
         const resp = await axios.get(`http://2captcha.com/in.php?key=${API_KEY_2CAPTCHA}&method=userrecaptcha&googlekey=${siteKey}&pageurl=${pageUrl}&json=1`);
         
         const requestId = resp.data.request;
-        console.log(`⏳ Esperando solución de captcha (ID: ${requestId})...`);
+        console.log(`⏳ Resolviendo Captcha (ID: ${requestId})...`);
 
         while (true) {
             await new Promise(r => setTimeout(r, 5000));
@@ -34,7 +34,7 @@ async function resolverCaptcha(page) {
             if (check.data.request !== 'CAPCHA_NOT_READY') throw new Error(check.data.request);
         }
     } catch (e) {
-        throw new Error("Error en Captcha: " + e.message);
+        throw new Error("Error en resolución de Captcha: " + e.message);
     }
 }
 
@@ -44,53 +44,57 @@ async function resolverCaptcha(page) {
 async function ejecutarScraping(cedula) {
     let browser;
     try {
-        console.log(`--- 🤖 PROCESANDO CÉDULA: ${cedula} ---`);
+        console.log(`--- 🤖 INICIANDO CONSULTA: ${cedula} ---`);
 
         browser = await puppeteer.launch({
-            // Usa el Chrome instalado por el Buildpack
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+            // RUTA FIJA PARA DOCKER
+            executablePath: '/usr/bin/google-chrome',
             headless: "new",
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
+                '--disable-gpu',
                 '--single-process'
             ]
         });
 
         const page = await browser.newPage();
+        // User agent real para evitar bloqueos
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
-        console.log("🔗 Conectando con la Policía...");
+        console.log("🔗 Navegando al portal de la Policía...");
         await page.goto('https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml', { 
             waitUntil: 'networkidle2', 
             timeout: 60000 
         });
 
-        // Interacción con la web
+        // 1. Aceptar términos
         await page.waitForSelector('#continuarBtn', { visible: true });
         await page.click('#continuarBtn');
         
+        // 2. Llenar formulario
         await page.waitForSelector('#form\\:cedulaInput', { visible: true });
         await page.type('#form\\:cedulaInput', cedula.toString());
         await page.select('#form\\:tipoDocumento', '1');
 
-        // Resolver Captcha
+        // 3. Resolver Captcha
         const token = await resolverCaptcha(page);
         await page.evaluate((t) => {
-            document.getElementById('g-recaptcha-response').innerHTML = t;
+            const el = document.getElementById('g-recaptcha-response');
+            if (el) el.innerHTML = t;
         }, token);
 
-        console.log("🛰️ Enviando formulario...");
+        console.log("🛰️ Enviando consulta...");
         await page.click('#form\\:consultarBtn');
         
-        // Capturar resultado
-        await page.waitForSelector('#form\\:panelResultado', { timeout: 30000 });
+        // 4. Esperar y extraer resultado
+        await page.waitForSelector('#form\\:panelResultado', { timeout: 35000 });
         const resultado = await page.evaluate(() => document.querySelector('#form\\:panelResultado').innerText);
 
-        console.log("📄 ¡DATOS OBTENIDOS!");
+        console.log("📄 ¡ÉXITO! Guardando resultado...");
         
-        // Guardar en Redis
+        // Guardar en Redis (Expira en 1 hora)
         await client.set(`resultado:${cedula}`, JSON.stringify({ 
             cedula, 
             resultado, 
@@ -98,44 +102,45 @@ async function ejecutarScraping(cedula) {
         }), { EX: 3600 });
 
     } catch (e) {
-        console.error(`❌ ERROR EN SCRAPING: ${e.message}`);
+        console.error(`❌ ERROR: ${e.message}`);
+        // Guardar el error para que la API sepa qué pasó
         await client.set(`resultado:${cedula}`, JSON.stringify({ error: e.message }), { EX: 300 });
     } finally {
         if (browser) await browser.close();
-        console.log(`--- 🏁 FIN DE TAREA: ${cedula} ---`);
+        console.log(`--- 🏁 FIN DE TAREA ---`);
     }
 }
 
 /**
- * 🌐 SERVIDOR EXPRESS (Para que Render lo marque como "Live")
+ * 🌐 SERVIDOR EXPRESS PARA HEALTH CHECK
  */
 const app = express();
-app.get('/', (req, res) => res.send('Worker Antecedentes Online 🚀'));
+app.get('/', (req, res) => res.send('Worker Antecedentes [Docker Mode] 🤖🚀'));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Servidor Health Check en puerto ${PORT}`);
-    iniciarRedis();
+    console.log(`✅ Servidor Express escuchando en puerto ${PORT}`);
+    iniciarProcesamientoRedis();
 });
 
 /**
- * 📥 ESCUCHA DE TAREAS EN REDIS
+ * 📥 BUCLE DE PROCESAMIENTO REDIS
  */
-async function iniciarRedis() {
+async function iniciarProcesamientoRedis() {
     try {
         if (!client.isOpen) await client.connect();
-        console.log("🚀 CONECTADO A REDIS Y ESPERANDO COLA...");
+        console.log("🚀 CONECTADO A REDIS. ESPERANDO TAREAS EN 'cola_consultas'...");
         
         while (true) {
             const tarea = await client.brPop('cola_consultas', 0);
             if (tarea) {
                 const data = JSON.parse(tarea.element);
-                // Acepta tanto un objeto {cedula: '...'} como el string directo
+                // Procesa ya sea que envíes un objeto {cedula: '...'} o solo el número
                 await ejecutarScraping(data.cedula || data);
             }
         }
     } catch (err) {
-        console.error("❌ Fallo en Redis:", err);
-        setTimeout(iniciarRedis, 5000);
+        console.error("❌ Error en conexión Redis:", err);
+        setTimeout(iniciarProcesamientoRedis, 5000);
     }
 }
