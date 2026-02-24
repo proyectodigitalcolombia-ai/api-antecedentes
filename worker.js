@@ -7,29 +7,26 @@ const path = require('path');
 
 puppeteer.use(StealthPlugin());
 
-// 1. Asegurar que la carpeta de capturas existe ANTES de todo
-const dir = './capturas';
-if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-}
+// Configuración de carpetas
+const dir = path.join(__dirname, 'capturas');
+if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
 const app = express();
-// Servir las capturas para que puedas verlas en el navegador
-app.use('/capturas', express.static(path.join(__dirname, 'capturas')));
+// Servir las imágenes directamente desde el Worker
+app.use('/ver', express.static(dir));
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// 2. Iniciar el servidor de Express (Vital para Render)
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Servidor de salud y capturas en puerto ${PORT}`);
+    console.log(`✅ Servidor del Worker activo en puerto ${PORT}`);
 });
 
 const client = redis.createClient({ url: process.env.REDIS_URL });
-client.on('error', (err) => console.error('Error en Redis:', err.message));
+client.on('error', (err) => {}); // Silenciar errores de conexión repetitivos
 
 async function ejecutarConsulta(cedula) {
-    console.log(`\n🔎 [${cedula}] Iniciando navegación...`);
+    console.log(`\n🔎 [${cedula}] Iniciando proceso...`);
     
     const browser = await puppeteer.launch({
         executablePath: '/usr/bin/google-chrome',
@@ -38,33 +35,34 @@ async function ejecutarConsulta(cedula) {
     });
 
     const page = await browser.newPage();
-
     try {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
         
+        console.log(`📡 Navegando a la Policía...`);
         await page.goto('https://antecedentes.policia.gov.co:7005/WebJudicial/antecedentes.xhtml', { 
             waitUntil: 'networkidle2', 
             timeout: 60000 
         });
 
-        // Intentar aceptar el modal
-        console.log(`⏳ Buscando términos...`);
-        try {
-            await page.waitForSelector('input[type="checkbox"]', { timeout: 15000 });
-            await page.click('input[type="checkbox"]');
-            await page.keyboard.press('Enter'); 
-            await new Promise(r => setTimeout(r, 4000));
-        } catch (errModal) {
-            console.log("⚠️ El modal no apareció o ya se aceptó.");
+        // Esperar y aceptar el modal de términos
+        await new Promise(r => setTimeout(r, 5000));
+        const checkbox = 'input[type="checkbox"]';
+        if (await page.$(checkbox)) {
+            await page.click(checkbox);
+            await page.keyboard.press('Enter');
+            console.log("✅ Términos aceptados.");
+            await new Promise(r => setTimeout(r, 3000));
         }
 
-        const fotoPath = path.join(dir, `${cedula}.png`);
-        await page.screenshot({ path: fotoPath, fullPage: true });
-
-        console.log(`✅ [${cedula}] Captura guardada con éxito.`);
+        // Tomar la captura
+        const nombreArchivo = `${cedula}.png`;
+        const rutaFinal = path.join(dir, nombreArchivo);
+        await page.screenshot({ path: rutaFinal, fullPage: true });
+        
+        console.log(`📸 Captura lista para CC ${cedula}`);
 
     } catch (e) {
-        console.error(`❌ [${cedula}] Error: ${e.message}`);
+        console.error(`❌ Error en consulta ${cedula}:`, e.message);
     } finally {
         await browser.close();
     }
@@ -72,9 +70,8 @@ async function ejecutarConsulta(cedula) {
 
 async function iniciar() {
     try {
-        console.log("🔄 Conectando a Redis...");
         if (!client.isOpen) await client.connect();
-        console.log("🤖 Worker listo y esperando tareas.");
+        console.log("🤖 Worker conectado a Redis y esperando tareas...");
         
         while (true) {
             const tarea = await client.brPop('cola_consultas', 0);
@@ -84,7 +81,6 @@ async function iniciar() {
             }
         }
     } catch (err) {
-        console.error("💥 Error en el bucle principal:", err.message);
         setTimeout(iniciar, 5000);
     }
 }
