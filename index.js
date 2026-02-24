@@ -1,51 +1,44 @@
-const express = require('express');
 const redis = require('redis');
-const cors = require('cors');
-
-const app = express();
-app.use(cors());
-app.use(express.json());
+const http = require('http');
 
 const REDIS_URL = 'redis://default:xU5AJJoh3pN1wo9dQqExFAiKJgKUFM0T@red-d6d4md5m5p6s73f5i2jg:6379';
 const NOMBRE_COLA = 'cola_consultas';
 
-const redisClient = redis.createClient({ url: REDIS_URL });
+const client = redis.createClient({ 
+    url: REDIS_URL,
+    socket: { reconnectStrategy: (retries) => Math.min(retries * 50, 1000) } 
+});
 
-redisClient.on('error', (err) => console.error('❌ Error en Redis (API):', err));
+client.on('error', (err) => console.log('❌ Error en Redis del Bot:', err));
 
-(async () => {
-    try {
-        await redisClient.connect();
-        console.log("🚀 API conectada a Redis exitosamente");
-    } catch (err) {
-        console.error("🚨 Error de conexión en API:", err);
+// Servidor para que Render lo mantenga en VERDE
+http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end("Bot de Antecedentes Activo");
+}).listen(10000);
+
+async function iniciarBot() {
+    await client.connect();
+    console.log("🚀 BOT CONECTADO A REDIS. Escuchando tareas...");
+
+    while (true) {
+        try {
+            // USAMOS BLPOP: Se queda esperando hasta que llegue algo
+            // Es más eficiente que RPOP
+            const item = await client.blPop(NOMBRE_COLA, 0); 
+            
+            if (item) {
+                const datos = JSON.parse(item.element);
+                console.log(`🔎 TRABAJO RECIBIDO: Procesando cédula ${datos.cedula}`);
+                
+                // Aquí irá tu código de Puppeteer
+                console.log("✅ Proceso completado.");
+            }
+        } catch (error) {
+            console.error("🚨 Error al leer de la cola:", error);
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Esperar 5 seg antes de reintentar
+        }
     }
-})();
+}
 
-// 🚩 ESTO ES LO QUE FALTA PARA EL COLOR VERDE
-app.get('/', (req, res) => {
-    res.status(200).send('API Principal funcionando correctamente');
-});
-
-app.get('/consultar', async (req, res) => {
-    const { cedula } = req.query;
-    if (!cedula) return res.status(400).json({ error: "Falta cédula" });
-
-    try {
-        const tarea = { cedula, timestamp: new Date().toISOString() };
-        
-        // Enviamos a Redis
-        await redisClient.rPush(NOMBRE_COLA, JSON.stringify(tarea));
-        
-        console.log(`📡 Cédula ${cedula} enviada a la cola.`);
-        res.status(200).json({ ok: true, mensaje: "Enviado al bot", cedula });
-    } catch (error) {
-        console.error("Error al enviar:", error);
-        res.status(500).json({ error: "Error de conexión con Redis" });
-    }
-});
-
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-    console.log(`✅ API escuchando en puerto ${PORT}`);
-});
+iniciarBot();
