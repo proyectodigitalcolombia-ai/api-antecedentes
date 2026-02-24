@@ -1,8 +1,6 @@
 {
-  "name": "api-antecedentes-bot",
+  "name": "api-antecedentes",
   "version": "1.0.0",
-  "description": "Sistema de API + Bot con 2Captcha",
-  "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "worker": "node worker.js"
@@ -12,8 +10,5 @@
     "redis": "^4.6.10",
     "puppeteer": "21.11.0",
     "2captcha": "^3.0.7"
-  },
-  "engines": {
-    "node": "20.x"
   }
 }
