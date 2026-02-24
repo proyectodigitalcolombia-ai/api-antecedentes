@@ -1,8 +1,6 @@
 const puppeteer = require('puppeteer');
 const redis = require('redis');
 
-// 1. Configuración de la URL de Redis
-// Asegúrate de tener la variable REDIS_URL configurada en el Dashboard de Render
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const NOMBRE_COLA = 'cola_consultas'; 
 
@@ -16,11 +14,8 @@ async function iniciarWorker() {
         await client.connect();
         console.log("🚀 REDIS: Conectado con éxito.");
 
-        // Loop infinito de escucha
         while (true) {
             console.log(`📡 Esperando mensajes en la cola: [${NOMBRE_COLA}]...`);
-            
-            // blPop espera hasta que llegue un mensaje (bloqueante)
             const registro = await client.blPop(NOMBRE_COLA, 0);
             
             if (registro) {
@@ -30,16 +25,27 @@ async function iniciarWorker() {
                 let browser;
                 try {
                     browser = await puppeteer.launch({
+                        headless: "new", // Esto quita el aviso de advertencia
                         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
                         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
                     });
 
                     const page = await browser.newPage();
                     
-                    // --- AQUÍ EMPIEZA TU LÓGICA DE NAVEGACIÓN ---
-                    console.log(`🌐 Abriendo navegador para: ${data.cedula}`);
-                    // await page.goto('https://www.ejemplo.com'); 
-                    // --------------------------------------------
+                    // ===========================================================
+                    // 🚩 PEGA TU LÓGICA DE NAVEGACIÓN AQUÍ ABAJO 🚩
+                    // ===========================================================
+                    
+                    console.log(`🌐 Navegando para la cédula: ${data.cedula}`);
+                    
+                    // Ejemplo de lo que iría aquí:
+                    // await page.goto('https://página-de-antecedentes.com');
+                    // await page.type('#campo-cedula', data.cedula);
+                    // await page.click('#boton-buscar');
+                    
+                    // ===========================================================
+                    // 🚩 FIN DE TU LÓGICA 🚩
+                    // ===========================================================
 
                     console.log(`✅ PROCESO COMPLETADO para: ${data.cedula}`);
 
@@ -52,10 +58,8 @@ async function iniciarWorker() {
         }
     } catch (error) {
         console.error("🚨 ERROR CRÍTICO EN EL WORKER:", error);
-        console.log("🔄 Reintentando conexión en 5 segundos...");
         setTimeout(iniciarWorker, 5000);
     }
 }
 
-// Iniciar el sistema
 iniciarWorker();
