@@ -3,13 +3,14 @@ FROM ghcr.io/puppeteer/puppeteer:21.11.0
 USER root
 WORKDIR /app
 
-# Copiamos package.json pero NO el lock si está dando problemas
+# Copiamos el manual de instrucciones
 COPY package.json ./
 
-# Instalación limpia
-RUN npm install --prefer-offline --no-audit
+# Instalamos las librerías
+RUN npm install --no-package-lock
 
+# Copiamos el código
 COPY . .
 
-# IMPORTANTE: Verifica que este archivo exista en tu repo
-CMD ["node", "worker.js"]
+# Ejecutamos el bot
+CMD ["npm", "run", "worker"]
