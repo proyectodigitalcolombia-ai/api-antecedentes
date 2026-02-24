@@ -1,21 +1,16 @@
 {
-  "name": "api-antecedentes",
+  "name": "bot-policia",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "worker": "node worker.js",
-    "postinstall": "echo 'Skipping browser download'"
+    "worker": "node worker.js"
   },
   "dependencies": {
-    "2captcha": "^3.0.7",
     "express": "^4.18.2",
-    "puppeteer-core": "^21.0.0",
+    "puppeteer": "^21.0.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "redis": "^4.6.10"
-  },
-  "engines": {
-    "node": "20.x"
   }
 }
