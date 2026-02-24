@@ -6,48 +6,30 @@ const app = express();
 app.use(express.json());
 
 const client = redis.createClient({ url: process.env.REDIS_URL });
-client.on('error', (err) => console.log('Redis Client Error', err));
 
 async function startApi() {
     await client.connect();
-    console.log('🚀 API de Inteligencia Masiva conectada a Redis');
+    console.log('🚀 API de Inteligencia conectada');
 
     app.post('/consultar', async (req, res) => {
-        const { cedula, nombre, apellido } = req.body;
+        const { cedula } = req.body;
 
-        // Validación de datos mínimos
-        if (!cedula || !nombre || !apellido) {
-            return res.status(400).json({ 
-                error: 'Faltan datos. Se requiere: cedula, nombre y apellido.' 
-            });
-        }
+        if (!cedula) return res.status(400).json({ error: 'Cédula requerida' });
 
         const consultaId = uuidv4();
-        const payload = {
-            id: consultaId,
-            cedula,
-            nombre: nombre.toUpperCase(),
-            apellido: apellido.toUpperCase(),
-            timestamp: new Date().toISOString()
-        };
+        const payload = { id: consultaId, cedula, timestamp: new Date().toISOString() };
 
-        try {
-            // Enviamos la tarea a la cola de Redis
-            await client.lPush('cola_consultas', JSON.stringify(payload));
-            
-            res.status(202).json({
-                mensaje: 'Consulta masiva iniciada',
-                consultaId,
-                fuentes_activas: ['Policia_COL', 'Interpol_RED', 'OFAC_Clinton', 'UE_Sanciones'],
-                estado: 'En cola'
-            });
-        } catch (error) {
-            res.status(500).json({ error: 'Error al encolar consulta' });
-        }
+        await client.lPush('cola_consultas', JSON.stringify(payload));
+        
+        res.status(202).json({
+            mensaje: 'Consulta masiva iniciada solo con cédula',
+            consultaId,
+            estado: 'El bot está identificando el nombre en la base de datos nacional...'
+        });
     });
 
     const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => console.log(`📡 API escuchando en puerto ${PORT}`));
+    app.listen(PORT, () => console.log(`📡 API escuchando en ${PORT}`));
 }
 
 startApi();
