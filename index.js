@@ -17,7 +17,7 @@ app.get('/consultar', async (req, res) => {
 
     try {
         await client.lPush('cola_consultas', JSON.stringify({ cedula }));
-        res.json({ status: "Recibido", mensaje: `Cédula ${cedula} enviada al Bot.` });
+        res.json({ status: "Recibido", mensaje: `Cédula ${cedula} en cola de procesamiento.` });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -25,5 +25,5 @@ app.get('/consultar', async (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 API lista en puerto ${PORT}`);
+    console.log(`🚀 API activa en puerto ${PORT}`);
 });
