@@ -1,7 +1,7 @@
 {
   "name": "api-antecedentes",
   "version": "1.0.0",
-  "description": "Sistema de consulta de antecedentes con sigilo",
+  "description": "Bot de consulta judicial con modo sigilo",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
