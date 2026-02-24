@@ -12,7 +12,7 @@ const client = createClient({ url: REDIS_URL });
 
 async function resolverCaptcha(page) {
     try {
-        console.log("🧩 Obteniendo SiteKey para 2Captcha...");
+        console.log("🧩 Obteniendo SiteKey...");
         const siteKey = await page.evaluate(() => {
             const el = document.querySelector('.g-recaptcha');
             return el ? el.getAttribute('data-sitekey') : null;
@@ -42,20 +42,13 @@ async function ejecutarScraping(cedula) {
     try {
         console.log(`--- 🤖 INICIANDO CONSULTA: ${cedula} ---`);
 
-        // RUTA DINÁMICA: Probamos la carpeta local .cache que creamos en el Build Command
-        const rutaLocal = path.join(process.cwd(), '.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome');
-        const rutaRender = '/opt/render/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome';
+        // Ruta donde moveremos Chrome manualmente
+        const rutaPersistente = path.join(process.cwd(), '.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome');
         
-        const executablePath = fs.existsSync(rutaLocal) ? rutaLocal : (fs.existsSync(rutaRender) ? rutaRender : null);
-
-        if (executablePath) {
-            console.log(`✅ Chrome detectado en: ${executablePath}`);
-        } else {
-            console.log("⚠️ No se halló Chrome en rutas conocidas. Intentando lanzamiento por defecto...");
-        }
+        console.log(`🔍 Verificando ejecutable en: ${rutaPersistente}`);
 
         browser = await puppeteer.launch({
-            executablePath: executablePath || undefined,
+            executablePath: fs.existsSync(rutaPersistente) ? rutaPersistente : undefined,
             headless: "new",
             args: [
                 '--no-sandbox',
@@ -69,7 +62,7 @@ async function ejecutarScraping(cedula) {
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
-        console.log("🔗 Navegando al portal de la Policía...");
+        console.log("🔗 Navegando al portal...");
         await page.goto('https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml', { 
             waitUntil: 'networkidle2', 
             timeout: 60000 
@@ -94,7 +87,7 @@ async function ejecutarScraping(cedula) {
         await page.waitForSelector('#form\\:panelResultado', { timeout: 35000 });
         const resultado = await page.evaluate(() => document.querySelector('#form\\:panelResultado').innerText);
 
-        console.log("📄 ¡ÉXITO! Datos guardados.");
+        console.log("📄 ¡ÉXITO! Datos obtenidos.");
         await client.set(`resultado:${cedula}`, JSON.stringify({ 
             cedula, 
             resultado, 
@@ -111,13 +104,13 @@ async function ejecutarScraping(cedula) {
 }
 
 const app = express();
-app.get('/', (req, res) => res.send('Worker Operativo 🤖'));
+app.get('/', (req, res) => res.send('Worker Online 🤖'));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', async () => {
     try {
         if (!client.isOpen) await client.connect();
-        console.log("🚀 WORKER CONECTADO.");
+        console.log("🚀 WORKER LISTO.");
         
         while (true) {
             const tarea = await client.brPop('cola_consultas', 0);
@@ -127,6 +120,6 @@ app.listen(PORT, '0.0.0.0', async () => {
             }
         }
     } catch (err) {
-        console.error("Error Redis:", err);
+        console.error("Redis Error:", err);
     }
 });
