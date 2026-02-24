@@ -3,29 +3,34 @@ const redis = require('redis');
 
 async function iniciarBot() {
     const client = redis.createClient({ url: process.env.REDIS_URL });
-    client.on('error', err => console.log('Redis Error', err));
+    client.on('error', err => console.log('❌ Redis Worker Error:', err));
+    
     await client.connect();
-
-    console.log('🤖 Bot conectado a Redis y esperando tareas...');
+    console.log('🤖 Bot conectado a Redis. Esperando tareas...');
 
     while (true) {
         try {
-            // Sacamos una cédula de la lista (bloquea hasta que haya una)
-            const { element: cedula } = await client.brPop('cola_consultas', 0);
-            console.log(`🔎 Procesando cédula: ${cedula}`);
+            // Sacamos la última cédula de la lista (bloquea hasta que haya una)
+            const tarea = await client.brPop('cola_consultas', 0);
+            const cedula = tarea.element;
+            
+            console.log(`🔎 Iniciando búsqueda para cédula: ${cedula}`);
 
             const browser = await puppeteer.launch({
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
+                executablePath: '/usr/bin/google-chrome',
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
             });
-            
+
             const page = await browser.newPage();
-            // --- AQUÍ IRÁ TU LÓGICA DE SCRAPPING ---
-            await page.goto('https://www.google.com'); // Ejemplo
-            console.log(`✅ Finalizado proceso para: ${cedula}`);
             
+            // --- INICIO DE TU SCRAPPING ---
+            await page.goto('https://www.google.com'); // Cambia por tu URL objetivo
+            console.log(`✅ Proceso completado para ${cedula}`);
+            // --- FIN DE TU SCRAPPING ---
+
             await browser.close();
         } catch (error) {
-            console.error('❌ Error en el bot:', error);
+            console.error('⚠️ Error procesando tarea:', error);
         }
     }
 }
