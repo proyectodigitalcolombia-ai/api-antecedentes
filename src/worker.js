@@ -41,12 +41,14 @@ async function ejecutarScraping(cedula) {
     try {
         console.log(`--- 🤖 INICIANDO CONSULTA: ${cedula} ---`);
 
-        // 📍 ESTA ES LA RUTA EXACTA QUE DIO TU LOG:
+        // 📍 RUTA CONFIRMADA POR TU LOG DE CONSTRUCCIÓN
         const RUTA_CHROME = '/opt/render/project/src/.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome';
 
         console.log(`🔍 Verificando archivo en: ${RUTA_CHROME}`);
         if (!fs.existsSync(RUTA_CHROME)) {
-            console.log("❌ Error fatal: El ejecutable sigue sin aparecer en la ruta.");
+            console.log("❌ ALERTA: El archivo no se detecta con fs.existsSync. Intentando lanzamiento de todos modos...");
+        } else {
+            console.log("✅ El archivo existe y es accesible.");
         }
 
         browser = await puppeteer.launch({
@@ -69,26 +71,33 @@ async function ejecutarScraping(cedula) {
             timeout: 60000 
         });
 
+        // Interacción inicial
         await page.waitForSelector('#continuarBtn', { visible: true });
         await page.click('#continuarBtn');
+        console.log("✔️ Botón continuar clickeado.");
         
+        // Ingreso de datos
         await page.waitForSelector('#form\\:cedulaInput', { visible: true });
         await page.type('#form\\:cedulaInput', cedula.toString());
         await page.select('#form\\:tipoDocumento', '1');
+        console.log("✔️ Datos de cédula ingresados.");
 
+        // Resolución de Captcha
         const token = await resolverCaptcha(page);
         await page.evaluate((t) => {
             const el = document.getElementById('g-recaptcha-response');
             if (el) el.innerHTML = t;
         }, token);
+        console.log("✔️ Token de Captcha inyectado.");
 
-        console.log("🛰️ Enviando consulta...");
+        // Envío y Resultado
         await page.click('#form\\:consultarBtn');
+        console.log("🛰️ Esperando respuesta del panel...");
         
         await page.waitForSelector('#form\\:panelResultado', { timeout: 35000 });
         const resultado = await page.evaluate(() => document.querySelector('#form\\:panelResultado').innerText);
 
-        console.log("📄 ¡ÉXITO! Información recuperada.");
+        console.log("📄 ¡ÉXITO! Datos recuperados satisfactoriamente.");
         await client.set(`resultado:${cedula}`, JSON.stringify({ 
             cedula, 
             resultado, 
@@ -96,25 +105,29 @@ async function ejecutarScraping(cedula) {
         }), { EX: 3600 });
 
     } catch (e) {
-        console.error(`❌ ERROR CRÍTICO: ${e.message}`);
-        await client.set(`resultado:${cedula}`, JSON.stringify({ error: e.message }), { EX: 300 });
+        console.error(`❌ ERROR EN EL PROCESO: ${e.message}`);
+        await client.set(`resultado:${cedula}`, JSON.stringify({ 
+            error: e.message,
+            paso: "scraping" 
+        }), { EX: 300 });
     } finally {
         if (browser) await browser.close();
         console.log(`--- 🏁 FIN DE TAREA: ${cedula} ---`);
     }
 }
 
-// Servidor para Render
+// Servidor Express para mantener vivo el servicio en Render
 const app = express();
-app.get('/', (req, res) => res.send('Worker Operativo 🤖'));
+app.get('/', (req, res) => res.send('Worker Policia Activo 🤖'));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', async () => {
     try {
         if (!client.isOpen) await client.connect();
-        console.log("🚀 WORKER CONECTADO Y ESCUCHANDO COLA.");
+        console.log("🚀 WORKER CONECTADO A REDIS Y LISTO PARA PROCESAR.");
         
         while (true) {
+            // Escucha tareas de la cola de Redis
             const tarea = await client.brPop('cola_consultas', 0);
             if (tarea) {
                 const data = JSON.parse(tarea.element);
@@ -122,6 +135,6 @@ app.listen(PORT, '0.0.0.0', async () => {
             }
         }
     } catch (err) {
-        console.error("Error en bucle:", err);
+        console.error("Error crítico en el bucle principal:", err);
     }
 });
