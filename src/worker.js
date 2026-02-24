@@ -42,7 +42,7 @@ async function ejecutarScraping(cedula) {
     try {
         console.log(`--- 🤖 INICIANDO CONSULTA: ${cedula} ---`);
 
-        // Ruta donde moveremos Chrome manualmente
+        // Ruta donde moveremos Chrome manualmente para que persista
         const rutaPersistente = path.join(process.cwd(), '.cache/puppeteer/chrome/linux-121.0.6167.85/chrome-linux64/chrome');
         
         console.log(`🔍 Verificando ejecutable en: ${rutaPersistente}`);
@@ -62,7 +62,7 @@ async function ejecutarScraping(cedula) {
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
-        console.log("🔗 Navegando al portal...");
+        console.log("🔗 Navegando al portal de la Policía...");
         await page.goto('https://srv2.policia.gov.co/antecedentes/publico/inicio.xhtml', { 
             waitUntil: 'networkidle2', 
             timeout: 60000 
@@ -110,7 +110,7 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', async () => {
     try {
         if (!client.isOpen) await client.connect();
-        console.log("🚀 WORKER LISTO.");
+        console.log("🚀 WORKER CONECTADO Y LISTO.");
         
         while (true) {
             const tarea = await client.brPop('cola_consultas', 0);
