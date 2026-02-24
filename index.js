@@ -1,35 +1,39 @@
 const express = require('express');
 const redis = require('redis');
-const { v4: uuidv4 } = require('uuid');
-
 const app = express();
+
 app.use(express.json());
 
+// Conector de Redis
 const client = redis.createClient({ url: process.env.REDIS_URL });
+client.on('error', (err) => console.log('Redis Client Error', err));
 
-async function startApi() {
-    await client.connect();
-    console.log('🚀 API de Inteligencia conectada');
+// Ruta de consulta (Soporta POST y GET para tu comodidad)
+app.all('/consultar', async (req, res) => {
+    const cedula = req.query.cedula || req.body.cedula;
 
-    app.post('/consultar', async (req, res) => {
-        const { cedula } = req.body;
+    if (!cedula) {
+        return res.status(400).json({ error: "Debes proporcionar una cédula. Ej: /consultar?cedula=123" });
+    }
 
-        if (!cedula) return res.status(400).json({ error: 'Cédula requerida' });
-
-        const consultaId = uuidv4();
-        const payload = { id: consultaId, cedula, timestamp: new Date().toISOString() };
-
-        await client.lPush('cola_consultas', JSON.stringify(payload));
+    try {
+        if (!client.isOpen) await client.connect();
         
-        res.status(202).json({
-            mensaje: 'Consulta masiva iniciada solo con cédula',
-            consultaId,
-            estado: 'El bot está identificando el nombre en la base de datos nacional...'
+        // Enviamos la tarea a la cola
+        await client.lPush('cola_consultas', JSON.stringify({ cedula }));
+        
+        console.log(`📥 Cédula ${cedula} enviada a la cola.`);
+        res.json({ 
+            status: "Enviado", 
+            mensaje: "El bot está procesando la consulta. Revisa los logs del Worker.",
+            cedula 
         });
-    });
+    } catch (error) {
+        res.status(500).json({ error: "Error de conexión con Redis" });
+    }
+});
 
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => console.log(`📡 API escuchando en ${PORT}`));
-}
-
-startApi();
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+    console.log(`🚀 API Principal corriendo en puerto ${PORT}`);
+});
