@@ -1,11 +1,21 @@
 const puppeteer = require('puppeteer');
 const redis = require('redis');
+const http = require('http'); // Necesario para el Health Check
 
+// 1. SERVIDOR DE SALUD (Para que Render se ponga en VERDE)
+const PORT = process.env.PORT || 10000;
+http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Worker is Live');
+}).listen(PORT, () => {
+    console.log(`✅ Health Check activo en puerto ${PORT}`);
+});
+
+// 2. CONFIGURACIÓN REDIS
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const NOMBRE_COLA = 'cola_consultas'; 
 
 const client = redis.createClient({ url: REDIS_URL });
-
 client.on('error', (err) => console.log('❌ Error en Redis Client:', err));
 
 async function iniciarWorker() {
@@ -15,17 +25,19 @@ async function iniciarWorker() {
         console.log("🚀 REDIS: Conectado con éxito.");
 
         while (true) {
-            console.log(`📡 Esperando mensajes en la cola: [${NOMBRE_COLA}]...`);
+            console.log(`📡 Esperando mensajes en [${NOMBRE_COLA}]...`);
+            
+            // blPop espera hasta que llegue un mensaje
             const registro = await client.blPop(NOMBRE_COLA, 0);
             
             if (registro) {
                 const data = JSON.parse(registro.element);
-                console.log(`🔎 TRABAJO RECIBIDO: Procesando cédula ${data.cedula}`);
+                console.log(`🔎 TRABAJO RECIBIDO: Cédula ${data.cedula}`);
 
                 let browser;
                 try {
                     browser = await puppeteer.launch({
-                        headless: "new", // Esto quita el aviso de advertencia
+                        headless: "new",
                         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
                         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
                     });
@@ -33,31 +45,25 @@ async function iniciarWorker() {
                     const page = await browser.newPage();
                     
                     // ===========================================================
-                    // 🚩 PEGA TU LÓGICA DE NAVEGACIÓN AQUÍ ABAJO 🚩
+                    // 🚩 TU LÓGICA DE NAVEGACIÓN AQUÍ 🚩
                     // ===========================================================
+                    console.log(`🌐 Navegando para: ${data.cedula}`);
                     
-                    console.log(`🌐 Navegando para la cédula: ${data.cedula}`);
-                    
-                    // Ejemplo de lo que iría aquí:
-                    // await page.goto('https://página-de-antecedentes.com');
-                    // await page.type('#campo-cedula', data.cedula);
-                    // await page.click('#boton-buscar');
-                    
-                    // ===========================================================
-                    // 🚩 FIN DE TU LÓGICA 🚩
+                    // Ejemplo:
+                    // await page.goto('https://página-destino.com');
                     // ===========================================================
 
                     console.log(`✅ PROCESO COMPLETADO para: ${data.cedula}`);
 
                 } catch (err) {
-                    console.error(`❌ Error en Puppeteer para ${data.cedula}:`, err.message);
+                    console.error(`❌ Error en Puppeteer:`, err.message);
                 } finally {
                     if (browser) await browser.close();
                 }
             }
         }
     } catch (error) {
-        console.error("🚨 ERROR CRÍTICO EN EL WORKER:", error);
+        console.error("🚨 ERROR CRÍTICO:", error);
         setTimeout(iniciarWorker, 5000);
     }
 }
