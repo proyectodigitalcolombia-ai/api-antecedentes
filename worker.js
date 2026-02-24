@@ -3,27 +3,27 @@ const redis = require('redis');
 const { Solver } = require('2captcha');
 const express = require('express');
 
-// Servidor dummy para Render
+// Servidor keep-alive para Render
 const app = express();
 const PORT = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Bot Operativo 🤖'));
-app.listen(PORT, '0.0.0.0', () => console.log(`- Keep-alive puerto ${PORT} -`));
+app.get('/', (req, res) => res.send('Bot Activo y Vigilando 🤖'));
+app.listen(PORT, '0.0.0.0', () => console.log(`- Puerto ${PORT} abierto -`));
 
 const solver = new Solver(process.env.API_KEY_2CAPTCHA);
 const client = redis.createClient({ url: process.env.REDIS_URL });
 
 async function iniciarBot() {
     await client.connect();
-    console.log('🤖 Bot listo para procesar cola de Redis...');
+    console.log('🤖 Bot conectado a Redis. Esperando misiones...');
 
     while (true) {
         try {
             const tarea = await client.brPop('cola_consultas', 0);
             const { cedula } = JSON.parse(tarea.element);
-            console.log(`\n🔎 --- INICIANDO CONSULTA: ${cedula} ---`);
+            console.log(`\n🔎 --- PROCESANDO: ${cedula} ---`);
             await procesarConsulta(cedula);
         } catch (error) {
-            console.error('❌ Error en ciclo:', error.message);
+            console.error('❌ Error en el ciclo:', error.message);
         }
     }
 }
@@ -49,32 +49,40 @@ async function procesarConsulta(cedula) {
             timeout: 60000 
         });
 
-        // --- MANEJO AGRESIVO DE TÉRMINOS ---
-        console.log('🕵️ Analizando si hay términos...');
-        const necesitaAceptar = await page.evaluate(() => {
-            return document.body.innerText.includes('Términos de uso');
-        });
+        // --- MANEJO DE TÉRMINOS EVOLUCIONADO ---
+        console.log('🕵️ Analizando pantalla de términos...');
+        const necesitaAceptar = await page.evaluate(() => document.body.innerText.includes('Términos de uso'));
 
         if (necesitaAceptar) {
-            console.log('📝 Términos detectados. Forzando clics con JS...');
+            console.log('📝 Ejecutando Triple Acción para aceptar términos...');
             await page.evaluate(() => {
-                // 1. Buscar y marcar el checkbox
-                const inputs = Array.from(document.querySelectorAll('input'));
-                const checkbox = inputs.find(i => i.type === 'checkbox' || i.id.toLowerCase().includes('acepto'));
-                if (checkbox) checkbox.click();
+                const check = document.querySelector('input[type="checkbox"]');
+                const btn = document.querySelector('button[id*="continuar"], input[type="submit"], .ui-button');
 
-                // 2. Buscar y clickear el botón de enviar
-                const botones = Array.from(document.querySelectorAll('input[type="submit"], button, a.ui-button'));
-                const enviar = botones.find(b => 
-                    b.innerText?.toLowerCase().includes('aceptar') || 
-                    b.value?.toLowerCase().includes('aceptar') ||
-                    b.id.toLowerCase().includes('continuar')
-                );
-                if (enviar) enviar.click();
+                if (check) {
+                    check.checked = true;
+                    // Disparamos eventos para que PrimeFaces se entere del cambio
+                    check.dispatchEvent(new Event('change', { bubbles: true }));
+                    check.dispatchEvent(new Event('click', { bubbles: true }));
+                }
+                
+                if (btn) {
+                    btn.focus();
+                    btn.click();
+                }
             });
             
-            console.log('⏳ Esperando a que cargue el formulario después de aceptar...');
-            await new Promise(r => setTimeout(r, 5000));
+            console.log('⏳ Esperando transición (8s)...');
+            await new Promise(r => setTimeout(r, 8000)); 
+            
+            // Verificación secundaria: si el botón sigue ahí, clic por Puppeteer (fuera de JS)
+            const sigueAhi = await page.evaluate(() => document.body.innerText.includes('Términos de uso'));
+            if (sigueAhi) {
+                console.log('⚠️ El clic de JS parece haber fallado, intentando clic nativo...');
+                const botonNativo = await page.$('button[id*="continuar"], input[type="submit"]');
+                if (botonNativo) await botonNativo.click();
+                await new Promise(r => setTimeout(r, 5000));
+            }
         }
 
         // --- BÚSQUEDA DEL CAPTCHA ---
@@ -82,14 +90,14 @@ async function procesarConsulta(cedula) {
         const captchaSelector = 'img[src*="captcha"], img[id*="cap"], img[id*="Captcha"]';
         
         const captchaImg = await page.waitForSelector(captchaSelector, { timeout: 25000 }).catch(async () => {
-            const txt = await page.evaluate(() => document.body.innerText.substring(0, 200));
-            throw new Error(`Captcha no visible. La página dice: ${txt}`);
+            const txt = await page.evaluate(() => document.body.innerText.substring(0, 300));
+            throw new Error(`No se saltó la pantalla de términos. Texto: ${txt}`);
         });
 
-        console.log('📸 Capturando Captcha para 2Captcha...');
+        console.log('📸 Capturando Captcha...');
         const screenshot = await captchaImg.screenshot({ encoding: 'base64' });
         const res = await solver.imageCaptcha(screenshot);
-        console.log(`✅ Solución recibida: ${res.data}`);
+        console.log(`✅ Captcha resuelto: ${res.data}`);
 
         // --- LLENADO DEL FORMULARIO ---
         await page.waitForSelector('input[id*="cedula"]', { timeout: 10000 });
@@ -98,23 +106,23 @@ async function procesarConsulta(cedula) {
         const captchaInput = await page.waitForSelector('input[id*="captcha"], input[id*="answer"]');
         await captchaInput.type(res.data);
         
-        console.log('🚀 Enviando consulta final...');
+        console.log('🚀 Enviando consulta...');
         await page.click('button[id*="consultar"], input[type="submit"]');
         
-        await new Promise(r => setTimeout(r, 7000));
+        await new Promise(r => setTimeout(r, 8000));
 
-        // --- EXTRACCIÓN DEL RESULTADO ---
+        // --- RESULTADO ---
         const resultado = await page.evaluate(() => {
             const body = document.body.innerText;
             if (body.includes('No tiene asuntos pendientes')) return "LIMPIO";
             if (body.includes('registra antecedentes')) return "CON ANTECEDENTES";
-            return "RESULTADO INCIERTO (Verificar manualmente)";
+            return "ERROR: No se pudo leer el veredicto final.";
         });
 
         console.log(`🏁 RESULTADO PARA ${cedula}: ${resultado}`);
 
     } catch (error) {
-        console.error(`❌ Fallo en el proceso: ${error.message}`);
+        console.error(`❌ Fallo crítico: ${error.message}`);
     } finally {
         await browser.close();
         console.log(`📦 Sesión cerrada.`);
