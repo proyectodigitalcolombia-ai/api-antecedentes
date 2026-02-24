@@ -1,57 +1,61 @@
 const puppeteer = require('puppeteer');
 const redis = require('redis');
 
-// Configuración de Redis (Render usa variables de entorno para esto)
-const client = redis.createClient({
-    url: process.env.REDIS_URL || 'redis://localhost:6379'
-});
+// 1. Configuración de la URL de Redis
+// Asegúrate de tener la variable REDIS_URL configurada en el Dashboard de Render
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const NOMBRE_COLA = 'cola_consultas'; 
 
-client.on('error', (err) => console.log('Redis Client Error', err));
+const client = redis.createClient({ url: REDIS_URL });
 
-async function processQueue() {
+client.on('error', (err) => console.log('❌ Error en Redis Client:', err));
+
+async function iniciarWorker() {
     try {
+        console.log("⏳ Conectando a Redis...");
         await client.connect();
-        console.log("🚀 Redis Conectado y esperando mensajes...");
+        console.log("🚀 REDIS: Conectado con éxito.");
 
+        // Loop infinito de escucha
         while (true) {
-            // Suponiendo que usas una cola llamada 'consultas'
-            const result = await client.blPop('consultas', 0);
-            const data = JSON.parse(result.element);
+            console.log(`📡 Esperando mensajes en la cola: [${NOMBRE_COLA}]...`);
             
-            console.log(`🔎 Procesando consulta para: ${data.id}`);
-
-            const browser = await puppeteer.launch({
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--single-process'
-                ]
-            });
-
-            const page = await browser.newPage();
+            // blPop espera hasta que llegue un mensaje (bloqueante)
+            const registro = await client.blPop(NOMBRE_COLA, 0);
             
-            try {
-                // AQUÍ VA TU LÓGICA DE NAVEGACIÓN
-                // Ejemplo:
-                // await page.goto('https://ejemplo.com');
-                // const info = await page.evaluate(() => document.title);
-                
-                console.log(`✅ Tarea completada para ${data.id}`);
-                
-            } catch (innerError) {
-                console.error("❌ Error navegando:", innerError);
-            } finally {
-                await browser.close();
+            if (registro) {
+                const data = JSON.parse(registro.element);
+                console.log(`🔎 TRABAJO RECIBIDO: Procesando cédula ${data.cedula}`);
+
+                let browser;
+                try {
+                    browser = await puppeteer.launch({
+                        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+                        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                    });
+
+                    const page = await browser.newPage();
+                    
+                    // --- AQUÍ EMPIEZA TU LÓGICA DE NAVEGACIÓN ---
+                    console.log(`🌐 Abriendo navegador para: ${data.cedula}`);
+                    // await page.goto('https://www.ejemplo.com'); 
+                    // --------------------------------------------
+
+                    console.log(`✅ PROCESO COMPLETADO para: ${data.cedula}`);
+
+                } catch (err) {
+                    console.error(`❌ Error en Puppeteer para ${data.cedula}:`, err.message);
+                } finally {
+                    if (browser) await browser.close();
+                }
             }
         }
     } catch (error) {
-        console.error("🚨 Error crítico en el worker:", error);
-        // Intentar reconectar tras un error
-        setTimeout(processQueue, 5000);
+        console.error("🚨 ERROR CRÍTICO EN EL WORKER:", error);
+        console.log("🔄 Reintentando conexión en 5 segundos...");
+        setTimeout(iniciarWorker, 5000);
     }
 }
 
-// Iniciar el proceso
-processQueue();
+// Iniciar el sistema
+iniciarWorker();
