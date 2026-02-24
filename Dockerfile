@@ -1,18 +1,20 @@
-FROM node:18
-# Instalar dependencias necesarias para Chrome
-RUN apt-get update && apt-get install -y \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libc6 \
-    # ... (y muchas más librerías)
-    --no-install-recommends && rm -rf /var/lib/apt/lists/*
+# Usamos una imagen que ya tiene Puppeteer y Chrome instalados
+FROM ghcr.io/puppeteer/puppeteer:21.11.0
 
+# Cambiamos a usuario root para tener permisos
+USER root
+
+# Directorio de trabajo
 WORKDIR /app
+
+# Copiamos solo los archivos de dependencias primero
 COPY package*.json ./
+
+# Instalamos dependencias (sin descargar Chrome otra vez)
 RUN npm install
-# Instalar Chrome
-RUN npx puppeteer browsers install chrome
+
+# Copiamos el resto del código
 COPY . .
+
+# Comando para arrancar el bot
 CMD ["node", "worker.js"]
