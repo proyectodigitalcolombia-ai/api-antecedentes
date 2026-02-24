@@ -17,7 +17,7 @@ app.get('/consultar', async (req, res) => {
 
     try {
         await client.lPush('cola_consultas', JSON.stringify({ cedula }));
-        res.json({ status: "Recibido", mensaje: `Cédula ${cedula} en cola de procesamiento.` });
+        res.json({ status: "Recibido", mensaje: `Cédula ${cedula} en cola.` });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
