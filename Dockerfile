@@ -1,18 +1,24 @@
+# Usamos la imagen oficial de Puppeteer que ya incluye Chrome y las dependencias de Linux
 FROM ghcr.io/puppeteer/puppeteer:21.6.0
 
+# Definimos el directorio de trabajo
 WORKDIR /app
 
-# Copia tus archivos de dependencias
+# --- 🚀 TRUCO DE VELOCIDAD ---
+# Evitamos que npm descargue otro Chrome, ya que usaremos el de la imagen base
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+
+# Copiamos archivos de dependencias
 COPY package*.json ./
 
-# Instala lo necesario
+# Instalamos las librerías (esto ahora será muy rápido)
 RUN npm install
 
-# Copia todo tu código a la imagen
+# Copiamos el resto del código del bot
 COPY . .
 
-# El puerto que usa Render
+# Puerto que usa Render
 EXPOSE 10000
 
-# Lanza tu worker
+# Comando para arrancar el bot
 CMD ["node", "src/worker.js"]
