@@ -1,20 +1,15 @@
-# 1. Usamos una imagen que ya trae Chrome instalado para ahorrar tiempo y RAM
 FROM ghcr.io/puppeteer/puppeteer:21.11.0
 
-# 2. Permisos de administrador para instalar carpetas
 USER root
-
-# 3. Carpeta de trabajo
 WORKDIR /app
 
-# 4. Copiamos los archivos de configuración primero
-COPY package*.json ./
+# Copiamos package.json pero NO el lock si está dando problemas
+COPY package.json ./
 
-# 5. Instalación ultra ligera (Evita que Render se congele)
-RUN npm install --no-package-lock --no-audit --no-fund
+# Instalación limpia
+RUN npm install --prefer-offline --no-audit
 
-# 6. Copiamos todo el código del bot
 COPY . .
 
-# 7. Comando para iniciar el Bot (Asegúrate de que tu archivo se llame worker.js)
+# IMPORTANTE: Verifica que este archivo exista en tu repo
 CMD ["node", "worker.js"]
