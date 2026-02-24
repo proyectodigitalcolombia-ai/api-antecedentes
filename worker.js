@@ -14,7 +14,7 @@ app.listen(PORT, '0.0.0.0', () => console.log(`✅ Worker Multi-Fuente Activo`))
 const solver = new Solver(process.env.API_KEY_2CAPTCHA);
 const client = redis.createClient({ url: process.env.REDIS_URL });
 
-// --- MÓDULO INTERNACIONAL: INTERPOL ---
+// --- 1. FUNCIÓN INTERPOL (Internacional - IP Directa) ---
 async function consultarInterpol(nombre, apellido) {
     const browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox'] });
     const page = await browser.newPage();
@@ -31,66 +31,67 @@ async function consultarInterpol(nombre, apellido) {
     finally { await browser.close(); }
 }
 
-// --- MÓDULO INTERNACIONAL: OFAC (LISTA CLINTON) ---
+// --- 2. FUNCIÓN OFAC / LISTA CLINTON (Internacional - IP Directa) ---
 async function consultarOFAC(nombre, apellido) {
     const browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox'] });
     const page = await browser.newPage();
     try {
-        console.log(`🇺🇸 Consultando OFAC (Lista Clinton): ${nombre} ${apellido}`);
+        console.log(`🇺🇸 Consultando OFAC: ${nombre} ${apellido}`);
         await page.goto('https://sanctionssearch.ofac.treas.gov/', { waitUntil: 'networkidle2' });
         await page.type('#ctl00_MainContent_txtLastName', `${apellido} ${nombre}`);
         await page.click('#ctl00_MainContent_btnSearch');
         await new Promise(r => setTimeout(r, 3000));
-        const resultado = await page.evaluate(() => {
-            const tabla = document.querySelector('#ctl00_MainContent_gvSearchResults');
-            return tabla ? "⚠️ COINCIDENCIA DETECTADA" : "✅ LIMPIO";
-        });
-        return resultado;
+        const tieneCoincidencias = await page.evaluate(() => !!document.querySelector('#ctl00_MainContent_gvSearchResults'));
+        return tieneCoincidencias ? "⚠️ COINCIDENCIA DETECTADA" : "✅ LIMPIO";
     } catch (e) { return "ERROR_OFAC"; }
     finally { await browser.close(); }
 }
 
-// --- MÓDULO NACIONAL: POLICÍA (CON PROXY) ---
+// --- 3. FUNCIÓN POLICÍA (Nacional - REQUIERE PROXY COLOMBIA) ---
 async function consultarPolicia(cedula) {
     const browser = await puppeteer.launch({
         headless: "new",
         args: ['--no-sandbox', `--proxy-server=http://${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`]
     });
     const page = await browser.newPage();
-    await page.authenticate({ username: process.env.PROXY_USER, password: process.env.PROXY_PASS });
     try {
-        console.log(`🇨🇴 Consultando Policía Nacional: ${cedula}`);
-        // ... (Aquí va tu lógica de Policía con Captcha que ya teníamos)
-        return "PROCESO_EXITOSO"; // Simplificado para el ejemplo
-    } catch (e) { return "ERROR_POLICIA"; }
+        await page.authenticate({ username: process.env.PROXY_USER, password: process.env.PROXY_PASS });
+        console.log(`🇨🇴 Consultando Policía COL: ${cedula}`);
+        await page.goto('https://antecedentes.policia.gov.co:7005/WebJudicial/antecedentes.xhtml', { waitUntil: 'networkidle2', timeout: 40000 });
+        
+        // (Aquí va la lógica de aceptar términos y captcha que ya conoces)
+        // Por ahora retornamos un placeholder para probar el flujo masivo
+        return "CONSULTA_ENVIADA";
+    } catch (e) { return "ERROR_POLICIA (IP Bloqueada)"; }
     finally { await browser.close(); }
 }
 
-// --- CICLO PRINCIPAL ---
-async function iniciarWorker() {
+// --- LÓGICA DE COORDINACIÓN ---
+async function iniciarSistema() {
     await client.connect();
-    console.log('🤖 Sistema de Inteligencia Masiva esperando tareas...');
-    
+    console.log('🤖 Escáner de Inteligencia iniciado. Esperando tarea...');
+
     while (true) {
         const tarea = await client.brPop('cola_consultas', 0);
         if (tarea) {
             const { cedula, nombre, apellido } = JSON.parse(tarea.element);
-            console.log(`\n🔎 ESCANEO INICIADO: ${nombre} ${apellido} (${cedula})`);
+            console.log(`\n🔎 INICIANDO REPORTE MASIVO PARA: ${nombre} ${apellido}`);
 
-            // Ejecutamos todo en paralelo para máxima velocidad
+            // Lanzamos las 3 misiones al mismo tiempo (Paralelismo)
             const [interpol, ofac, policia] = await Promise.all([
                 consultarInterpol(nombre, apellido),
                 consultarOFAC(nombre, apellido),
                 consultarPolicia(cedula)
             ]);
 
+            console.log(`------------------------------------------`);
             console.log(`📊 REPORTE CONSOLIDADO:`);
             console.log(`- Interpol: ${interpol}`);
-            console.log(`- OFAC (EE.UU): ${ofac}`);
-            console.log(`- Policía COL: ${policia}`);
+            console.log(`- OFAC (USA): ${ofac}`);
+            console.log(`- Policía (COL): ${policia}`);
             console.log(`------------------------------------------`);
         }
     }
 }
 
-iniciarWorker();
+iniciarSistema();
