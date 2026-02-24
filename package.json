@@ -1,14 +1,13 @@
 {
-  "name": "api-principal",
+  "name": "api-antecedentes-worker",
   "version": "1.0.0",
-  "description": "API para recibir consultas y enviarlas a Redis",
-  "main": "index.js",
+  "main": "worker.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node worker.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
     "redis": "^4.6.10",
-    "cors": "^2.8.5"
+    "puppeteer": "^21.0.0",
+    "2captcha-javascript": "^1.0.0"
   }
 }
