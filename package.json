@@ -1,12 +1,12 @@
 {
-  "name": "worker-antecedentes",
+  "name": "api-antecedentes",
   "version": "1.0.0",
-  "main": "worker.js",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "express": "^4.18.2",
-    "redis": "^4.6.10",
-    "puppeteer": "^21.11.0",
-    "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "redis": "^4.6.10"
   }
 }
