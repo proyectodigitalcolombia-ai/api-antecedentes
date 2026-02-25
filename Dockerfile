@@ -1,16 +1,16 @@
-FROM node:20-slim
+FROM node:20
 
 WORKDIR /app
 
-# Instalamos solo lo necesario para la API
+# Instalamos dependencias
 COPY package*.json ./
-RUN npm install --only=production
+RUN npm install
 
-# Copiamos el archivo index.js
-COPY index.js .
+# Copiamos el código
+COPY . .
 
-# Exponemos el puerto de Render
+# Puerto de Render
 EXPOSE 10000
 
-# Comando para iniciar la API
+# Comando de arranque
 CMD ["node", "index.js"]
