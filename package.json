@@ -1,7 +1,7 @@
 {
   "name": "api-antecedentes",
   "version": "1.0.0",
-  "description": "API para recibir consultas de antecedentes",
+  "description": "Punto de entrada para consultas de antecedentes",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
