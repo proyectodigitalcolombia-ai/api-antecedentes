@@ -1,16 +1,20 @@
-FROM ghcr.io/puppeteer/puppeteer:21.11.0
+# Usamos Node 20
+FROM node:20
 
-USER root
+# Crear directorio de trabajo
 WORKDIR /app
 
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV NODE_VERSION=20
-
+# Copiar archivos de dependencias
 COPY package*.json ./
+
+# Instalar dependencias
 RUN npm install
 
+# Copiar el resto del código (incluyendo index.js)
 COPY . .
-RUN chown -R pptruser:pptruser /app
-USER pptruser
 
-CMD ["node", "worker.js"]
+# Exponer el puerto que usa Render (10000 por defecto)
+EXPOSE 10000
+
+# Comando para arrancar la API
+CMD ["node", "index.js"]
