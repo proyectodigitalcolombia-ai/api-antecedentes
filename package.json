@@ -1,11 +1,7 @@
 {
   "name": "worker-antecedentes",
   "version": "1.0.0",
-  "description": "Bot extractor de antecedentes",
   "main": "worker.js",
-  "scripts": {
-    "start": "node worker.js"
-  },
   "dependencies": {
     "express": "^4.18.2",
     "redis": "^4.6.10",
