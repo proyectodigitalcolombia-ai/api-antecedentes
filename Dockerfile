@@ -1,7 +1,7 @@
-# Usamos Node 20 como base (conforme a tu variable NODE_VERSION)
+# Usamos Node 20 (Variable NODE_VERSION=20)
 FROM node:20
 
-# 1. Instalar librerías del sistema necesarias para que Google Chrome funcione en Linux
+# Instalamos dependencias del sistema para Google Chrome
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -12,25 +12,25 @@ RUN apt-get update && apt-get install -y \
     libnss3 \
     lsb-release \
     xdg-utils \
+    fonts-liberation \
+    libgbm1 \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Crear carpeta de trabajo
 WORKDIR /app
 
-# 3. Copiar dependencias e instalarlas
+# Copiamos archivos de dependencias
 COPY package*.json ./
 RUN npm install
 
-# 4. INSTALAR EL NAVEGADOR (Este es el comando que preguntabas)
+# Instalamos el navegador para Puppeteer
 RUN npx puppeteer install
 
-# 5. Copiar todo el código (index.js, worker.js, etc.)
+# Copiamos todo el código
 COPY . .
 
-# 6. Exponer el puerto
+# Exponemos el puerto de Render
 EXPOSE 10000
 
-# 7. Comando de inicio
-# NOTA: Si este servicio es el WORKER, usa "worker.js". Si es la API, usa "index.js"
-CMD ["node", "worker.js"]
+# Comando por defecto (será ignorado por la configuración de Render que haremos abajo)
+CMD ["node", "index.js"]
