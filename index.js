@@ -2,57 +2,54 @@ const express = require('express');
 const redis = require('redis');
 const app = express();
 
-// Configuración de la conexión a Redis
+// Configuración de Redis con la URL de entorno
 const client = redis.createClient({
     url: process.env.REDIS_URL
 });
 
 client.on('error', (err) => console.error('❌ Error en Redis:', err));
-client.on('connect', () => console.log('✅ Conectado a Redis con éxito'));
+client.on('connect', () => console.log('✅ API conectada a Redis correctamente'));
 
-// RUTA RAÍZ: Para que al entrar a https://tu-api.onrender.com/ diga algo
+// 1. RUTA DE PRUEBA (Para verificar si el servidor responde)
 app.get('/', (req, res) => {
-    res.status(200).send('API Antecedentes Operativa ✅ (Usa /consultar?cedula=XXX)');
+    res.send('<h1>API Antecedentes Operativa ✅</h1><p>Usa /consultar?cedula=123</p>');
 });
 
-// RUTA DE CONSULTA: Esta es la que estabas probando
+// 2. RUTA DE CONSULTA (La que necesitas)
 app.get('/consultar', async (req, res) => {
     const { cedula } = req.query;
+    console.log(`📩 Petición recibida para cédula: ${cedula}`);
 
     if (!cedula) {
-        return res.status(400).json({ 
-            ok: false, 
-            error: "Debes proporcionar una cédula. Ejemplo: /consultar?cedula=12345" 
-        });
+        return res.status(400).json({ error: "Falta el parámetro 'cedula'" });
     }
 
     try {
         if (!client.isOpen) await client.connect();
 
         const tarea = JSON.stringify({
-            cedula: cedula,
+            cedula,
             timestamp: new Date().toISOString()
         });
 
-        // Metemos la tarea en la cola para el Worker
+        // Enviamos a la cola que el worker ya está escuchando
         await client.lPush('cola_consultas', tarea);
-
-        console.log(`📥 Cédula ${cedula} recibida y enviada a Redis`);
+        
+        console.log(`🚀 Cédula ${cedula} enviada a Redis exitosamente`);
 
         res.json({
             ok: true,
-            mensaje: `Cédula ${cedula} recibida. El Worker está procesándola.`,
-            cedula: cedula
+            mensaje: `Cédula ${cedula} en cola de procesamiento.`,
+            status: "Enviado al Worker"
         });
-
     } catch (error) {
-        console.error("❌ Error enviando a Redis:", error);
-        res.status(500).json({ ok: false, error: "Error de conexión con la base de datos de tareas." });
+        console.error("❌ Error procesando consulta:", error);
+        res.status(500).json({ error: "Error interno conectando con Redis" });
     }
 });
 
-// Puerto obligatorio para Render
+// Forzar el puerto 10000 para Render
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 API corriendo en el puerto ${PORT}`);
+    console.log(`🚀 API activa y escuchando en puerto ${PORT}`);
 });
