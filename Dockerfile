@@ -1,20 +1,25 @@
-# Usamos Node 20
 FROM node:20
 
-# Crear directorio de trabajo
+# Instalar dependencias de Linux necesarias para Chrome
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
+    ca-certificates \
+    procps \
+    libxss1 \
+    libasound2 \
+    libnss3 \
+    lsb-release \
+    xdg-utils \
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
-
-# Copiar archivos de dependencias
 COPY package*.json ./
-
-# Instalar dependencias
 RUN npm install
 
-# Copiar el resto del código (incluyendo index.js)
+# Comando clave: Instalar el navegador dentro de la imagen
+RUN npx puppeteer install
+
 COPY . .
-
-# Exponer el puerto que usa Render (10000 por defecto)
-EXPOSE 10000
-
-# Comando para arrancar la API
-CMD ["node", "index.js"]
+CMD ["node", "worker.js"]
