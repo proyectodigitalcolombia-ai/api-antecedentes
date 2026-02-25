@@ -2,36 +2,51 @@ const express = require('express');
 const redis = require('redis');
 const app = express();
 
-const client = redis.createClient({ url: process.env.REDIS_URL });
+// Configuración de Redis
+const client = redis.createClient({
+    url: process.env.REDIS_URL
+});
 
-client.on('error', (err) => console.log('Redis Client Error', err));
+client.on('error', (err) => console.error('❌ Error en Redis:', err));
+client.on('connect', () => console.log('✅ Conectado a Redis'));
 
+// Ruta de Salud (VITAL para Render)
+app.get('/', (req, res) => {
+    res.status(200).send('API Antecedentes Operativa ✅');
+});
+
+// Ruta para recibir las cédulas
 app.get('/consultar', async (req, res) => {
     const { cedula } = req.query;
-    if (!cedula) return res.status(400).json({ error: "Falta la cédula" });
+
+    if (!cedula) {
+        return res.status(400).json({ error: "Falta la cédula. Ejemplo: /consultar?cedula=123" });
+    }
 
     try {
         if (!client.isOpen) await client.connect();
-        
-        // Metemos la cédula en la cola para que el Worker la vea
-        await client.lPush('cola_consultas', JSON.stringify({ 
-            cedula, 
-            timestamp: new Date().toISOString() 
-        }));
 
-        res.json({ 
-            status: "Encolado", 
-            mensaje: `La cédula ${cedula} está siendo procesada por el bot`,
-            ver_resultado: `https://api-principal-v2.onrender.com/ver/${cedula}.png`
+        const tarea = JSON.stringify({
+            cedula,
+            timestamp: new Date().toISOString()
+        });
+
+        // Enviamos a la cola que el worker escucha
+        await client.lPush('cola_consultas', tarea);
+
+        res.json({
+            ok: true,
+            mensaje: `Cédula ${cedula} enviada exitosamente.`,
+            estado: "En cola"
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error(error);
+        res.status(500).json({ error: "Error de conexión con el backend." });
     }
 });
 
-app.get('/health', (req, res) => res.send('API Operativa ✅'));
-
+// Puerto dinámico para Render
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 API escuchando en puerto ${PORT}`);
+    console.log(`🚀 API escuchando en el puerto ${PORT}`);
 });
